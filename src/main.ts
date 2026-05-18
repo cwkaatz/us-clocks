@@ -27,11 +27,11 @@ interface Zone {
 }
 
 const ZONES: Zone[] = [
-  { label: "Eastern",  abbr: "ET",  tz: "America/New_York",     posX: 435, posY: 110 },
+  { label: "Eastern",  abbr: "ET",  tz: "America/New_York",     posX: 435, posY: 145 },
   { label: "Central",  abbr: "CT",  tz: "America/Chicago",      posX: 335, posY: 100 },
   { label: "Mountain", abbr: "MT",  tz: "America/Denver",       posX: 215, posY: 125 },
-  { label: "Pacific",  abbr: "PT",  tz: "America/Los_Angeles",  posX: 100, posY: 150 },
-  { label: "Alaska",   abbr: "AKT", tz: "America/Anchorage",    posX: 30,  posY: 220 },
+  { label: "Pacific",  abbr: "PT",  tz: "America/Los_Angeles",  posX: 100, posY: 165 },
+  { label: "Alaska",   abbr: "AKT", tz: "America/Anchorage",    posX: 30,  posY: 235 },
 ];
 
 const MAP_W = 200;
