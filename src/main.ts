@@ -19,23 +19,24 @@ declare const __APP_VERSION__: string;
 interface Zone {
   label: string;
   tz: string;
+  // Approximate position on the 576×288 lens canvas for the "geographic
+  // labels" view. Picked to roughly match each zone's region on a US map.
+  posX: number;
+  posY: number;
 }
 
 const ZONES: Zone[] = [
-  { label: "Eastern", tz: "America/New_York" },
-  { label: "Central", tz: "America/Chicago" },
-  { label: "Mountain", tz: "America/Denver" },
-  { label: "Pacific", tz: "America/Los_Angeles" },
-  { label: "Alaska", tz: "America/Anchorage" },
+  { label: "Eastern",  tz: "America/New_York",     posX: 435, posY: 110 },
+  { label: "Central",  tz: "America/Chicago",      posX: 335, posY: 100 },
+  { label: "Mountain", tz: "America/Denver",       posX: 215, posY: 125 },
+  { label: "Pacific",  tz: "America/Los_Angeles",  posX: 100, posY: 150 },
+  { label: "Alaska",   tz: "America/Anchorage",    posX: 30,  posY: 220 },
 ];
-
-const LIST_CONTAINER_ID = 1;
-const LIST_CONTAINER_NAME = "clocks";
-const MAP_CONTAINER_ID = 2;
-const MAP_CONTAINER_NAME = "map";
 
 const MAP_W = 200;
 const MAP_H = 100;
+const MAP_CONTAINER_ID = 100;
+const MAP_CONTAINER_NAME = "map";
 
 const statusEl = document.getElementById("status") as HTMLParagraphElement;
 const clocksEl = document.getElementById("clocks") as HTMLPreElement;
@@ -66,9 +67,8 @@ function renderPhone(): void {
   clocksEl.textContent = buildListContent();
 }
 
-// Renders the US outline (contiguous 48 + AK, Hawaii excluded) extracted
-// from us-atlas at build time. Source is Albers-USA-projected pixel coords
-// for a ~1015×594 canvas; we fit-and-center into whatever (w, h) we get.
+// ---- Map drawing (US outline from us-atlas, AK + 48, no HI) ----
+
 function drawUsMap(ctx: CanvasRenderingContext2D, w: number, h: number): void {
   ctx.fillStyle = "black";
   ctx.fillRect(0, 0, w, h);
@@ -80,7 +80,6 @@ function drawUsMap(ctx: CanvasRenderingContext2D, w: number, h: number): void {
   const { minX, maxX, minY, maxY } = US_OUTLINE_BOUNDS;
   const srcW = maxX - minX;
   const srcH = maxY - minY;
-  // Fit uniformly to avoid distortion. Then center.
   const scale = Math.min(w / srcW, h / srcH);
   const ox = (w - srcW * scale) / 2 - minX * scale;
   const oy = (h - srcH * scale) / 2 - minY * scale;
@@ -99,14 +98,57 @@ function drawUsMap(ctx: CanvasRenderingContext2D, w: number, h: number): void {
   }
 }
 
-function buildHudFields() {
+// ---- Three views ----
+
+type ViewKind = "column" | "positions" | "map";
+const VIEWS: ViewKind[] = ["column", "positions", "map"];
+
+function buildColumnView() {
+  // Single text container, full-width-ish, centered vertically.
+  const list = new TextContainerProperty({
+    xPosition: 140,
+    yPosition: 60,
+    width: 360,
+    height: 180,
+    containerID: 1,
+    containerName: "list",
+    content: buildListContent(),
+    isEventCapture: 1,
+  });
+  return { containerTotalNum: 1, textObject: [list] };
+}
+
+function buildPositionsView() {
+  // One text container per zone, placed at its approximate geographic
+  // position on the 576×288 canvas. First container captures events.
+  const textObject = ZONES.map(
+    (z, i) =>
+      new TextContainerProperty({
+        xPosition: z.posX,
+        yPosition: z.posY,
+        width: 130,
+        height: 32,
+        containerID: i + 1,
+        containerName: `pos-${i + 1}`,
+        content: formatDayTime(z.tz, new Date()),
+        isEventCapture: i === 0 ? 1 : 0,
+      }),
+  );
+  return { containerTotalNum: ZONES.length, textObject };
+}
+
+function buildMapView() {
+  // List on the left, image (map) on the right. List is vertically centered
+  // with the map so they read as a single composition.
+  // Map: y=94..194 (center y=144).
+  // List: 5 rows, ~28 px each ≈ 140 px tall. Place y so center matches map.
   const list = new TextContainerProperty({
     xPosition: 20,
-    yPosition: 20,
+    yPosition: 74,
     width: 260,
-    height: 248,
-    containerID: LIST_CONTAINER_ID,
-    containerName: LIST_CONTAINER_NAME,
+    height: 140,
+    containerID: 1,
+    containerName: "list",
     content: buildListContent(),
     isEventCapture: 1,
   });
@@ -121,8 +163,18 @@ function buildHudFields() {
   return { containerTotalNum: 2, textObject: [list], imageObject: [map] };
 }
 
-async function ensureHud(bridge: Bridge): Promise<"created" | "rebuilt"> {
-  const fields = buildHudFields();
+function buildView(view: ViewKind) {
+  if (view === "column") return buildColumnView();
+  if (view === "positions") return buildPositionsView();
+  return buildMapView();
+}
+
+// ---- Bridge plumbing ----
+
+async function applyPage(
+  bridge: Bridge,
+  fields: ReturnType<typeof buildView>,
+): Promise<"created" | "rebuilt"> {
   const createResult = await bridge.createStartUpPageContainer(
     new CreateStartUpPageContainer(fields),
   );
@@ -132,16 +184,32 @@ async function ensureHud(bridge: Bridge): Promise<"created" | "rebuilt"> {
   throw new Error(`create=${createResult}, rebuild=false`);
 }
 
-async function pushListUpdate(bridge: Bridge): Promise<void> {
+async function pushListContainer(bridge: Bridge): Promise<void> {
   await bridge.textContainerUpgrade(
     new TextContainerUpgrade({
-      containerID: LIST_CONTAINER_ID,
-      containerName: LIST_CONTAINER_NAME,
+      containerID: 1,
+      containerName: "list",
       contentOffset: 0,
       contentLength: 0,
       content: buildListContent(),
     }),
   );
+}
+
+async function pushPositionContainers(bridge: Bridge): Promise<void> {
+  const now = new Date();
+  // Serialize — SDK docs warn against concurrent sends.
+  for (let i = 0; i < ZONES.length; i++) {
+    await bridge.textContainerUpgrade(
+      new TextContainerUpgrade({
+        containerID: i + 1,
+        containerName: `pos-${i + 1}`,
+        contentOffset: 0,
+        contentLength: 0,
+        content: formatDayTime(ZONES[i].tz, now),
+      }),
+    );
+  }
 }
 
 async function sendMapImage(bridge: Bridge): Promise<ImageRawDataUpdateResult> {
@@ -202,31 +270,48 @@ async function start(): Promise<void> {
     if (pctx) drawUsMap(pctx, mapEl.width, mapEl.height);
   }
 
-  const bridge = await waitForBridgeWithTimeout();
-  if (!bridge) {
+  const maybeBridge = await waitForBridgeWithTimeout();
+  if (!maybeBridge) {
     statusEl.textContent =
       "No bridge. Run in evenhub-simulator (npx -y @evenrealities/evenhub-simulator http://localhost:5174) or load via the Even App.";
     return;
   }
+  const bridge: Bridge = maybeBridge;
+
+  let viewIndex = 0;
+  let busy = false;
+
+  async function showView(idx: number): Promise<void> {
+    const wrapped = ((idx % VIEWS.length) + VIEWS.length) % VIEWS.length;
+    viewIndex = wrapped;
+    const view = VIEWS[wrapped];
+    statusEl.textContent = `Bridge ready. View: ${view}.`;
+    await applyPage(bridge, buildView(view));
+    if (view === "map") {
+      try {
+        const r = await sendMapImage(bridge);
+        if (r !== ImageRawDataUpdateResult.success) {
+          statusEl.textContent = `Bridge ready. Map: ${r}.`;
+        }
+      } catch (err) {
+        statusEl.textContent = `Bridge ready. Map upload failed: ${err}`;
+      }
+    }
+  }
 
   try {
-    const mode = await ensureHud(bridge);
-    statusEl.textContent = `Bridge ready. HUD ${mode}. Sending map…`;
+    await showView(0);
   } catch (err) {
     statusEl.textContent = `HUD setup failed: ${err}`;
     return;
   }
 
-  try {
-    const r = await sendMapImage(bridge);
-    statusEl.textContent = `Bridge ready. Map: ${r}.`;
-  } catch (err) {
-    statusEl.textContent = `Bridge ready. Map upload failed: ${err}`;
-  }
-
+  // Time refresh tick — updates whichever containers the current view has.
   scheduleNextUpdate(async () => {
     try {
-      await pushListUpdate(bridge);
+      const view = VIEWS[viewIndex];
+      if (view === "positions") await pushPositionContainers(bridge);
+      else await pushListContainer(bridge);
     } catch {
       /* ignore — next tick retries */
     }
@@ -235,8 +320,35 @@ async function start(): Promise<void> {
   bridge.onEvenHubEvent(async (event) => {
     const e = event.textEvent ?? event.sysEvent;
     if (!e) return;
-    if (e.eventType === OsEventTypeList.DOUBLE_CLICK_EVENT) {
+    const type = e.eventType;
+    if (type === OsEventTypeList.DOUBLE_CLICK_EVENT) {
       await bridge.shutDownPageContainer(1);
+      return;
+    }
+    if (busy) return;
+    if (type === OsEventTypeList.SCROLL_BOTTOM_EVENT) {
+      // swipe down → next view
+      busy = true;
+      try {
+        await showView(viewIndex + 1);
+      } catch (err) {
+        statusEl.textContent = `View switch failed: ${err}`;
+      } finally {
+        busy = false;
+      }
+      return;
+    }
+    if (type === OsEventTypeList.SCROLL_TOP_EVENT) {
+      // swipe up → previous view
+      busy = true;
+      try {
+        await showView(viewIndex - 1);
+      } catch (err) {
+        statusEl.textContent = `View switch failed: ${err}`;
+      } finally {
+        busy = false;
+      }
+      return;
     }
   });
 }
