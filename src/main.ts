@@ -18,6 +18,7 @@ declare const __APP_VERSION__: string;
 
 interface Zone {
   label: string;
+  abbr: string;
   tz: string;
   // Approximate position on the 576×288 lens canvas for the "geographic
   // labels" view. Picked to roughly match each zone's region on a US map.
@@ -26,11 +27,11 @@ interface Zone {
 }
 
 const ZONES: Zone[] = [
-  { label: "Eastern",  tz: "America/New_York",     posX: 435, posY: 110 },
-  { label: "Central",  tz: "America/Chicago",      posX: 335, posY: 100 },
-  { label: "Mountain", tz: "America/Denver",       posX: 215, posY: 125 },
-  { label: "Pacific",  tz: "America/Los_Angeles",  posX: 100, posY: 150 },
-  { label: "Alaska",   tz: "America/Anchorage",    posX: 30,  posY: 220 },
+  { label: "Eastern",  abbr: "ET",  tz: "America/New_York",     posX: 435, posY: 110 },
+  { label: "Central",  abbr: "CT",  tz: "America/Chicago",      posX: 335, posY: 100 },
+  { label: "Mountain", abbr: "MT",  tz: "America/Denver",       posX: 215, posY: 125 },
+  { label: "Pacific",  abbr: "PT",  tz: "America/Los_Angeles",  posX: 100, posY: 150 },
+  { label: "Alaska",   abbr: "AKT", tz: "America/Anchorage",    posX: 30,  posY: 220 },
 ];
 
 const MAP_W = 200;
@@ -118,6 +119,10 @@ function buildColumnView() {
   return { containerTotalNum: 1, textObject: [list] };
 }
 
+function positionContent(z: Zone, when: Date = new Date()): string {
+  return `${z.abbr} ${formatDayTime(z.tz, when)}`;
+}
+
 function buildPositionsView() {
   // One text container per zone, placed at its approximate geographic
   // position on the 576×288 canvas. First container captures events.
@@ -126,11 +131,11 @@ function buildPositionsView() {
       new TextContainerProperty({
         xPosition: z.posX,
         yPosition: z.posY,
-        width: 130,
+        width: 150,
         height: 32,
         containerID: i + 1,
         containerName: `pos-${i + 1}`,
-        content: formatDayTime(z.tz, new Date()),
+        content: positionContent(z),
         isEventCapture: i === 0 ? 1 : 0,
       }),
   );
@@ -206,7 +211,7 @@ async function pushPositionContainers(bridge: Bridge): Promise<void> {
         containerName: `pos-${i + 1}`,
         contentOffset: 0,
         contentLength: 0,
-        content: formatDayTime(ZONES[i].tz, now),
+        content: positionContent(ZONES[i], now),
       }),
     );
   }
