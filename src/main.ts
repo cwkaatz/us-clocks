@@ -146,13 +146,19 @@ function renderPhone(): void {
 
 // ---- Map drawing (US outline from us-atlas, AK + 48, no HI) ----
 
+// Approximate Albers USA x-coords for the US time-zone meridians
+// (Pacific/Mountain ~120°W, Mountain/Central ~104°W, Central/Eastern ~87°W),
+// plus the y-range of the contiguous 48 in source coords. Eyeballed against
+// us-atlas states-albers-10m; close enough for visual dividers.
+const TZ_DIVIDER_X = [275, 445, 625];
+const TZ_DIVIDER_Y_TOP = 70;
+const TZ_DIVIDER_Y_BOTTOM = 470;
+
+const MAP_STROKE = "#22ff66";
+
 function drawUsMap(ctx: CanvasRenderingContext2D, w: number, h: number): void {
   ctx.fillStyle = "black";
   ctx.fillRect(0, 0, w, h);
-  ctx.strokeStyle = "white";
-  ctx.lineWidth = 1;
-  ctx.lineJoin = "round";
-  ctx.lineCap = "round";
 
   const { minX, maxX, minY, maxY } = US_OUTLINE_BOUNDS;
   const srcW = maxX - minX;
@@ -161,6 +167,34 @@ function drawUsMap(ctx: CanvasRenderingContext2D, w: number, h: number): void {
   const ox = (w - srcW * scale) / 2 - minX * scale;
   const oy = (h - srcH * scale) / 2 - minY * scale;
 
+  const lineWidth = Math.max(1, w / 400);
+  const glow = Math.max(2, w / 120);
+  const dash = Math.max(2, w / 120);
+
+  ctx.lineJoin = "round";
+  ctx.lineCap = "round";
+  ctx.strokeStyle = MAP_STROKE;
+  ctx.shadowColor = MAP_STROKE;
+  ctx.shadowBlur = glow;
+
+  // Time-zone dividers (dashed, vertical, contiguous US only). Drawn first so
+  // the solid outline overpaints them where they touch the coast.
+  ctx.save();
+  ctx.lineWidth = lineWidth;
+  ctx.setLineDash([dash, dash * 1.5]);
+  for (const px of TZ_DIVIDER_X) {
+    const x = ox + px * scale;
+    const yTop = oy + TZ_DIVIDER_Y_TOP * scale;
+    const yBot = oy + TZ_DIVIDER_Y_BOTTOM * scale;
+    ctx.beginPath();
+    ctx.moveTo(x, yTop);
+    ctx.lineTo(x, yBot);
+    ctx.stroke();
+  }
+  ctx.restore();
+
+  // Solid outline.
+  ctx.lineWidth = lineWidth;
   for (const line of US_OUTLINE_POLYLINES) {
     if (line.length < 2) continue;
     ctx.beginPath();
@@ -173,6 +207,8 @@ function drawUsMap(ctx: CanvasRenderingContext2D, w: number, h: number): void {
     }
     ctx.stroke();
   }
+
+  ctx.shadowBlur = 0;
 }
 
 // ---- Three views ----

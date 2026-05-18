@@ -5,28 +5,33 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>US Clocks</title>
     <style>
-      :root { color-scheme: light dark; }
+      :root { color-scheme: light; }
       body {
         font-family: -apple-system, system-ui, sans-serif;
         margin: 0;
         padding: 1.25rem;
         max-width: 28rem;
         margin-inline: auto;
+        background: #ffffff;
+        color: #111111;
       }
       header { display: flex; justify-content: space-between; align-items: baseline; margin: 0 0 0.5rem; }
-      h1 { font-size: 1.25rem; margin: 0; }
-      .version { color: #888; font-size: 0.75rem; font-variant-numeric: tabular-nums; }
-      .status { font-size: 0.875rem; margin: 0 0 0.75rem; }
-      .hint { color: #666; font-size: 0.8125rem; margin: 0 0 1rem; }
+      h1 { font-size: 1.25rem; margin: 0; color: #111111; }
+      .version { color: #555555; font-size: 0.75rem; font-variant-numeric: tabular-nums; }
+      .status { font-size: 0.875rem; margin: 0 0 0.75rem; color: #111111; }
+      .hint { color: #333333; font-size: 0.8125rem; margin: 0 0 1rem; }
       pre {
-        background: rgba(0,0,0,0.06);
-        padding: 0.75rem 1rem;
+        background: #f3f4f6;
+        color: #111111;
+        padding: 0.875rem 1rem;
         border-radius: 8px;
-        font-size: 1rem;
-        line-height: 1.5;
+        font-size: 1.0625rem;
+        line-height: 1.55;
         font-variant-numeric: tabular-nums;
+        font-weight: 600;
         white-space: pre;
         margin: 0;
+        border: 1px solid #e5e7eb;
       }
       .lens-preview {
         display: flex;
@@ -38,30 +43,32 @@
       .lens-preview canvas {
         background: #000;
         border-radius: 6px;
-        max-width: 100%;
+        width: 100%;
         height: auto;
       }
       .info {
         margin-top: 1.25rem;
         padding: 0.875rem 1rem;
-        background: rgba(0,0,0,0.04);
+        background: #f3f4f6;
+        border: 1px solid #e5e7eb;
         border-radius: 8px;
       }
       .info h2 {
         font-size: 0.75rem;
         text-transform: uppercase;
         letter-spacing: 0.06em;
-        color: #888;
+        color: #4b5563;
         margin: 0 0 0.5rem;
       }
       .info p {
         margin: 0.25rem 0;
-        font-size: 0.875rem;
-        line-height: 1.4;
+        font-size: 0.9375rem;
+        line-height: 1.5;
+        color: #111111;
       }
       .fact {
         font-style: italic;
-        color: #555;
+        color: #1f2937;
         min-height: 2.5em;
       }
     </style>
@@ -75,7 +82,7 @@
     <p class="hint">Time across six US zones, updated every minute. Swipe on the glasses to switch views. Double-tap to exit.</p>
     <div class="lens-preview">
       <pre id="clocks"></pre>
-      <canvas id="map" width="200" height="100" aria-label="US map preview"></canvas>
+      <canvas id="map" width="800" height="400" aria-label="US map preview"></canvas>
     </div>
 
     <section class="info">
