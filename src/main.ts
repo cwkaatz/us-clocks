@@ -10,6 +10,7 @@ import {
   ImageRawDataUpdateResult,
   OsEventTypeList,
 } from "@evenrealities/even_hub_sdk";
+import { US_OUTLINE_POLYLINES, US_OUTLINE_BOUNDS } from "./us-outline";
 
 type Bridge = NonNullable<Awaited<ReturnType<typeof waitForEvenAppBridge>>>;
 
@@ -65,105 +66,37 @@ function renderPhone(): void {
   clocksEl.textContent = buildListContent();
 }
 
-// ~130-vertex contiguous-48 outline. Each entry is [longitude, latitude].
-// Traced clockwise from Cape Flattery (NW corner). The northern edge dips
-// south through the Great Lakes (border runs through Superior / Huron /
-// Erie / Ontario), giving the recognisable upper-Midwest indent that
-// distinguishes a US silhouette from a generic blob.
-const US_OUTLINE: [number, number][] = [
-  // Northern border (W → E)
-  [-124.7, 48.4], [-123.5, 48.5], [-123.0, 49.0], [-122.7, 48.99],
-  [-118.0, 49.0], [-115.0, 49.0], [-110.0, 49.0], [-104.0, 49.0],
-  [-99.5, 49.0], [-97.2, 49.0], [-95.2, 49.4], [-94.5, 48.7],
-  [-92.5, 48.0], [-91.0, 47.5], [-89.5, 47.8], [-88.0, 48.0],
-  [-86.0, 46.8], [-84.8, 46.0], [-83.5, 46.0], [-83.0, 45.0],
-  [-82.5, 43.0], [-82.4, 42.4], [-82.8, 41.5], [-80.5, 42.1],
-  [-79.5, 42.6], [-79.0, 42.9], [-77.8, 43.3], [-76.2, 43.5],
-  [-75.0, 44.5], [-73.4, 45.0], [-71.5, 45.0], [-70.5, 45.5],
-  [-69.2, 47.4], [-68.0, 47.3], [-67.5, 47.0],
-  // Atlantic (N → S)
-  [-67.0, 44.8], [-68.5, 44.4], [-69.8, 43.9], [-70.6, 43.6],
-  [-70.8, 42.7], [-70.6, 42.4], [-70.0, 41.8], [-70.3, 41.6],
-  [-71.0, 41.5], [-71.5, 41.4], [-72.5, 41.3], [-72.9, 41.2],
-  [-73.6, 40.9], [-73.7, 40.6], [-73.2, 40.6], [-72.5, 40.9],
-  [-72.9, 40.7], [-73.7, 40.5], [-74.0, 39.6], [-75.0, 38.8],
-  [-75.1, 38.0], [-76.3, 37.0], [-75.9, 36.6], [-75.5, 35.5],
-  [-76.3, 34.7], [-77.5, 34.3], [-79.0, 33.5], [-80.0, 32.5],
-  [-81.0, 31.7], [-81.4, 30.7],
-  // Florida loop
-  [-81.0, 29.8], [-80.6, 28.5], [-80.0, 26.5], [-80.2, 25.7],
-  [-80.5, 25.2], [-81.0, 25.1], [-81.5, 25.1], [-81.8, 24.5],
-  [-82.3, 25.5], [-82.7, 27.0], [-82.7, 28.0], [-83.0, 29.0],
-  [-83.8, 29.8], [-84.4, 30.0],
-  // Gulf Coast (E → W)
-  [-85.5, 29.7], [-86.5, 30.4], [-87.5, 30.3], [-88.0, 30.4],
-  [-88.5, 30.3], [-89.0, 30.3], [-89.4, 29.5], [-89.0, 29.0],
-  [-89.5, 28.9], [-90.5, 29.0], [-91.5, 29.5], [-93.0, 29.6],
-  [-94.0, 29.7], [-95.0, 29.4], [-96.0, 28.5], [-97.0, 27.9],
-  [-97.2, 26.4], [-97.4, 26.0],
-  // Mexican border (E → W → N)
-  [-99.0, 26.4], [-100.0, 28.5], [-101.5, 29.7], [-102.5, 29.8],
-  [-103.0, 29.0], [-104.0, 29.5], [-105.5, 31.0], [-106.5, 31.8],
-  [-108.2, 31.8], [-108.2, 31.3], [-109.0, 31.3], [-111.0, 31.3],
-  [-113.0, 32.0], [-114.8, 32.5],
-  // Pacific Coast (S → N)
-  [-117.1, 32.5], [-117.3, 33.5], [-118.2, 33.7], [-118.5, 34.0],
-  [-119.2, 34.2], [-120.5, 34.5], [-120.7, 35.2], [-121.0, 35.6],
-  [-121.5, 36.0], [-121.9, 36.6], [-122.4, 37.5], [-122.5, 37.8],
-  [-123.0, 38.5], [-123.5, 38.9], [-123.8, 39.6], [-124.3, 40.4],
-  [-124.1, 41.7], [-124.4, 42.6], [-124.4, 43.7], [-124.0, 44.6],
-  [-124.0, 45.5], [-123.9, 46.3], [-124.1, 47.0], [-124.6, 47.8],
-];
-
-// Alaska in canvas-relative coords (0..1). Mainland blob + SE panhandle.
-const ALASKA_OUTLINE: [number, number][] = [
-  [0.020, 0.18], [0.030, 0.10], [0.060, 0.03], [0.130, 0.02],
-  [0.170, 0.04], [0.205, 0.08], [0.215, 0.14], [0.190, 0.18],
-  [0.205, 0.22], [0.220, 0.28], [0.190, 0.30], [0.180, 0.24],
-  [0.155, 0.20], [0.110, 0.20], [0.060, 0.22],
-];
-
-function projectUs(lon: number, lat: number, w: number, h: number): [number, number] {
-  const xL = -125;
-  const xR = -67;
-  const yT = 49.5;
-  const yB = 24;
-  const nx = (lon - xL) / (xR - xL);
-  const ny = (yT - lat) / (yT - yB);
-  // Contiguous 48 occupies most of the canvas; AK lives in the top-left
-  // quadrant. No Hawaii any more so we use the bottom-left freely.
-  return [(0.22 + nx * 0.77) * w, (0.05 + ny * 0.92) * h];
-}
-
+// Renders the US outline (contiguous 48 + AK, Hawaii excluded) extracted
+// from us-atlas at build time. Source is Albers-USA-projected pixel coords
+// for a ~1015×594 canvas; we fit-and-center into whatever (w, h) we get.
 function drawUsMap(ctx: CanvasRenderingContext2D, w: number, h: number): void {
   ctx.fillStyle = "black";
   ctx.fillRect(0, 0, w, h);
   ctx.strokeStyle = "white";
-  ctx.fillStyle = "white";
-  ctx.lineWidth = 1.5;
+  ctx.lineWidth = 1;
   ctx.lineJoin = "round";
   ctx.lineCap = "round";
 
-  // Contiguous 48
-  ctx.beginPath();
-  US_OUTLINE.forEach(([lon, lat], i) => {
-    const [x, y] = projectUs(lon, lat, w, h);
-    if (i === 0) ctx.moveTo(x, y);
-    else ctx.lineTo(x, y);
-  });
-  ctx.closePath();
-  ctx.stroke();
+  const { minX, maxX, minY, maxY } = US_OUTLINE_BOUNDS;
+  const srcW = maxX - minX;
+  const srcH = maxY - minY;
+  // Fit uniformly to avoid distortion. Then center.
+  const scale = Math.min(w / srcW, h / srcH);
+  const ox = (w - srcW * scale) / 2 - minX * scale;
+  const oy = (h - srcH * scale) / 2 - minY * scale;
 
-  // Alaska
-  ctx.beginPath();
-  ALASKA_OUTLINE.forEach(([rx, ry], i) => {
-    const x = rx * w;
-    const y = ry * h;
-    if (i === 0) ctx.moveTo(x, y);
-    else ctx.lineTo(x, y);
-  });
-  ctx.closePath();
-  ctx.stroke();
+  for (const line of US_OUTLINE_POLYLINES) {
+    if (line.length < 2) continue;
+    ctx.beginPath();
+    for (let i = 0; i < line.length; i++) {
+      const [px, py] = line[i];
+      const x = ox + px * scale;
+      const y = oy + py * scale;
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+  }
 }
 
 function buildHudFields() {

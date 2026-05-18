@@ -1,7 +1,7 @@
 {
   "name": "us-clocks",
   "private": true,
-  "version": "0.4.0",
+  "version": "0.5.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -12,7 +12,9 @@
     "@evenrealities/even_hub_sdk": "^0.0.10"
   },
   "devDependencies": {
+    "topojson-client": "^3.1.0",
     "typescript": "^5.7.3",
+    "us-atlas": "^3.0.1",
     "vite": "^5.4.0"
   }
 }

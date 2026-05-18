@@ -14,7 +14,15 @@ Two containers on the 576×288 HUD canvas:
   Pacific   Sat 11:23
   Alaska    Sat 10:23
   ```
-- **Right half** — US outline rendered in JS via the HTML `canvas` API, exported as PNG, sent to the lens via `bridge.updateImageRawData`. ~130-vertex hand-traced contiguous-48 polygon (Great Lakes indent, Florida loop, Texas/Brownsville bulge, Pacific NW peninsula) plus a 15-vertex Alaska in the top-left with the SE panhandle. The image container is capped by the SDK at 200×100 px, 4-bit greyscale.
+- **Right half** — real cartographic US outline. Extracted at build time from [us-atlas](https://github.com/topojson/us-atlas) (`states-albers-10m.json`, Natural Earth via D3, public domain) into a flat array of polylines pre-projected to Albers USA. ~4,500 points across 135 polylines, including the Great Lakes shorelines, Long Island, the Aleutians, and every coastal cape. Rendered at runtime to a 200×100 canvas, exported as PNG, sent to the lens via `bridge.updateImageRawData`. Hawaii is filtered out at extraction time.
+
+To regenerate the outline (e.g. switch to a different simplification level or include Hawaii):
+
+```bash
+node scripts/extract-us-outline.mjs
+```
+
+That rewrites `src/us-outline.ts`; commit the regenerated file.
 
 ## Why the outline is hand-drawn
 
