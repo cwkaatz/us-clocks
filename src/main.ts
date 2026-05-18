@@ -16,18 +16,16 @@ type Bridge = NonNullable<Awaited<ReturnType<typeof waitForEvenAppBridge>>>;
 declare const __APP_VERSION__: string;
 
 interface Zone {
-  abbr: string;
   label: string;
   tz: string;
 }
 
 const ZONES: Zone[] = [
-  { abbr: "ET", label: "Eastern", tz: "America/New_York" },
-  { abbr: "CT", label: "Central", tz: "America/Chicago" },
-  { abbr: "MT", label: "Mountain", tz: "America/Denver" },
-  { abbr: "PT", label: "Pacific", tz: "America/Los_Angeles" },
-  { abbr: "AK", label: "Alaska", tz: "America/Anchorage" },
-  { abbr: "HI", label: "Hawaii", tz: "Pacific/Honolulu" },
+  { label: "Eastern", tz: "America/New_York" },
+  { label: "Central", tz: "America/Chicago" },
+  { label: "Mountain", tz: "America/Denver" },
+  { label: "Pacific", tz: "America/Los_Angeles" },
+  { label: "Alaska", tz: "America/Anchorage" },
 ];
 
 const LIST_CONTAINER_ID = 1;
@@ -35,7 +33,6 @@ const LIST_CONTAINER_NAME = "clocks";
 const MAP_CONTAINER_ID = 2;
 const MAP_CONTAINER_NAME = "map";
 
-// Image container size — bounded by SDK constraint (max 200×100 per docs §6).
 const MAP_W = 200;
 const MAP_H = 100;
 
@@ -45,30 +42,87 @@ const mapEl = document.getElementById("map") as HTMLCanvasElement | null;
 const versionEl = document.getElementById("version") as HTMLSpanElement | null;
 if (versionEl) versionEl.textContent = `v${__APP_VERSION__}`;
 
-function formatTime(tz: string, when: Date): string {
-  return when.toLocaleTimeString("en-US", {
+function formatDayTime(tz: string, when: Date): string {
+  const day = new Intl.DateTimeFormat("en-US", {
+    timeZone: tz,
+    weekday: "short",
+  }).format(when);
+  const time = when.toLocaleTimeString("en-US", {
     timeZone: tz,
     hour: "2-digit",
     minute: "2-digit",
     hour12: false,
   });
+  return `${day} ${time}`;
 }
 
 function buildListContent(when: Date = new Date()): string {
-  // Pad the labels to a common width so columns align (font is non-monospace
-  // but spaces are consistent enough to look intentional).
   const widest = Math.max(...ZONES.map((z) => z.label.length));
-  return ZONES.map((z) => `${z.label.padEnd(widest)}  ${formatTime(z.tz, when)}`).join("\n");
+  return ZONES.map((z) => `${z.label.padEnd(widest)}  ${formatDayTime(z.tz, when)}`).join("\n");
 }
 
 function renderPhone(): void {
   clocksEl.textContent = buildListContent();
 }
 
-// Higher-fidelity US outline. The contiguous 48 is a ~70-vertex polygon
-// projected from lon/lat; Alaska is a hand-traced quad-ish with a panhandle
-// (canvas-relative coords); Hawaii is four filled ellipses of graduating size
-// arranged NW→SE like the major islands.
+// ~130-vertex contiguous-48 outline. Each entry is [longitude, latitude].
+// Traced clockwise from Cape Flattery (NW corner). The northern edge dips
+// south through the Great Lakes (border runs through Superior / Huron /
+// Erie / Ontario), giving the recognisable upper-Midwest indent that
+// distinguishes a US silhouette from a generic blob.
+const US_OUTLINE: [number, number][] = [
+  // Northern border (W → E)
+  [-124.7, 48.4], [-123.5, 48.5], [-123.0, 49.0], [-122.7, 48.99],
+  [-118.0, 49.0], [-115.0, 49.0], [-110.0, 49.0], [-104.0, 49.0],
+  [-99.5, 49.0], [-97.2, 49.0], [-95.2, 49.4], [-94.5, 48.7],
+  [-92.5, 48.0], [-91.0, 47.5], [-89.5, 47.8], [-88.0, 48.0],
+  [-86.0, 46.8], [-84.8, 46.0], [-83.5, 46.0], [-83.0, 45.0],
+  [-82.5, 43.0], [-82.4, 42.4], [-82.8, 41.5], [-80.5, 42.1],
+  [-79.5, 42.6], [-79.0, 42.9], [-77.8, 43.3], [-76.2, 43.5],
+  [-75.0, 44.5], [-73.4, 45.0], [-71.5, 45.0], [-70.5, 45.5],
+  [-69.2, 47.4], [-68.0, 47.3], [-67.5, 47.0],
+  // Atlantic (N → S)
+  [-67.0, 44.8], [-68.5, 44.4], [-69.8, 43.9], [-70.6, 43.6],
+  [-70.8, 42.7], [-70.6, 42.4], [-70.0, 41.8], [-70.3, 41.6],
+  [-71.0, 41.5], [-71.5, 41.4], [-72.5, 41.3], [-72.9, 41.2],
+  [-73.6, 40.9], [-73.7, 40.6], [-73.2, 40.6], [-72.5, 40.9],
+  [-72.9, 40.7], [-73.7, 40.5], [-74.0, 39.6], [-75.0, 38.8],
+  [-75.1, 38.0], [-76.3, 37.0], [-75.9, 36.6], [-75.5, 35.5],
+  [-76.3, 34.7], [-77.5, 34.3], [-79.0, 33.5], [-80.0, 32.5],
+  [-81.0, 31.7], [-81.4, 30.7],
+  // Florida loop
+  [-81.0, 29.8], [-80.6, 28.5], [-80.0, 26.5], [-80.2, 25.7],
+  [-80.5, 25.2], [-81.0, 25.1], [-81.5, 25.1], [-81.8, 24.5],
+  [-82.3, 25.5], [-82.7, 27.0], [-82.7, 28.0], [-83.0, 29.0],
+  [-83.8, 29.8], [-84.4, 30.0],
+  // Gulf Coast (E → W)
+  [-85.5, 29.7], [-86.5, 30.4], [-87.5, 30.3], [-88.0, 30.4],
+  [-88.5, 30.3], [-89.0, 30.3], [-89.4, 29.5], [-89.0, 29.0],
+  [-89.5, 28.9], [-90.5, 29.0], [-91.5, 29.5], [-93.0, 29.6],
+  [-94.0, 29.7], [-95.0, 29.4], [-96.0, 28.5], [-97.0, 27.9],
+  [-97.2, 26.4], [-97.4, 26.0],
+  // Mexican border (E → W → N)
+  [-99.0, 26.4], [-100.0, 28.5], [-101.5, 29.7], [-102.5, 29.8],
+  [-103.0, 29.0], [-104.0, 29.5], [-105.5, 31.0], [-106.5, 31.8],
+  [-108.2, 31.8], [-108.2, 31.3], [-109.0, 31.3], [-111.0, 31.3],
+  [-113.0, 32.0], [-114.8, 32.5],
+  // Pacific Coast (S → N)
+  [-117.1, 32.5], [-117.3, 33.5], [-118.2, 33.7], [-118.5, 34.0],
+  [-119.2, 34.2], [-120.5, 34.5], [-120.7, 35.2], [-121.0, 35.6],
+  [-121.5, 36.0], [-121.9, 36.6], [-122.4, 37.5], [-122.5, 37.8],
+  [-123.0, 38.5], [-123.5, 38.9], [-123.8, 39.6], [-124.3, 40.4],
+  [-124.1, 41.7], [-124.4, 42.6], [-124.4, 43.7], [-124.0, 44.6],
+  [-124.0, 45.5], [-123.9, 46.3], [-124.1, 47.0], [-124.6, 47.8],
+];
+
+// Alaska in canvas-relative coords (0..1). Mainland blob + SE panhandle.
+const ALASKA_OUTLINE: [number, number][] = [
+  [0.020, 0.18], [0.030, 0.10], [0.060, 0.03], [0.130, 0.02],
+  [0.170, 0.04], [0.205, 0.08], [0.215, 0.14], [0.190, 0.18],
+  [0.205, 0.22], [0.220, 0.28], [0.190, 0.30], [0.180, 0.24],
+  [0.155, 0.20], [0.110, 0.20], [0.060, 0.22],
+];
+
 function projectUs(lon: number, lat: number, w: number, h: number): [number, number] {
   const xL = -125;
   const xR = -67;
@@ -76,54 +130,10 @@ function projectUs(lon: number, lat: number, w: number, h: number): [number, num
   const yB = 24;
   const nx = (lon - xL) / (xR - xL);
   const ny = (yT - lat) / (yT - yB);
-  // Contiguous 48 occupies x:[0.25w, 1.0w], y:[0.05h, 0.85h]; AK top-left,
-  // HI bottom-left.
-  return [(0.25 + nx * 0.74) * w, (0.05 + ny * 0.78) * h];
+  // Contiguous 48 occupies most of the canvas; AK lives in the top-left
+  // quadrant. No Hawaii any more so we use the bottom-left freely.
+  return [(0.22 + nx * 0.77) * w, (0.05 + ny * 0.92) * h];
 }
-
-const US_OUTLINE: [number, number][] = [
-  // Northern border, west → east
-  [-123, 48.5], [-122.5, 49], [-114, 49], [-104, 49], [-97.2, 49], [-94, 49],
-  [-89, 48], [-83.5, 45.8], [-83, 41.7], [-80, 42.5], [-79, 43.3],
-  [-77.5, 43.5], [-76, 44], [-74, 44.5], [-71, 45], [-69.2, 47.4], [-67.5, 47],
-  // Atlantic, north → south
-  [-67, 44.8], [-70.5, 43.6], [-70.7, 42.5], [-70.0, 41.7], [-71, 41.3],
-  [-72.5, 41], [-74, 40.5], [-74.5, 39.3], [-75.5, 38], [-76, 36.8],
-  [-75.5, 35.5], [-77, 34.4], [-79, 33], [-81, 31.5], [-81.5, 30.5],
-  // Florida loop
-  [-80.5, 28.5], [-80.2, 26], [-80.5, 25], [-81.8, 24.5], [-82.5, 27],
-  [-83, 29.5],
-  // Gulf, east → west
-  [-84.5, 30], [-87, 30.3], [-88.5, 30.3], [-89.5, 29], [-91.5, 29.3],
-  [-93.8, 29.5], [-95, 29.2], [-97, 27.6], [-97.4, 26],
-  // Mexican border, east → west
-  [-99, 27], [-100, 28.5], [-102, 29.7], [-103.5, 29], [-104.5, 30],
-  [-106.5, 31.8], [-108.2, 31.3], [-111, 31.3], [-114.7, 32.5],
-  // Pacific, south → north
-  [-117, 32.5], [-118, 33.8], [-119.5, 34.4], [-120.5, 34.5], [-121, 35.5],
-  [-121.7, 36.5], [-122, 37], [-122.5, 37.8], [-123, 38.3], [-123.5, 38.9],
-  [-124.3, 40.4], [-124, 41.7], [-124.2, 43], [-124.1, 44.5], [-124, 46.3],
-  [-124, 47.5], [-124.7, 48.4],
-];
-
-// Alaska in canvas-relative coords (0..1). Rough mainland blob with a
-// panhandle on the SE side — enough to read as "Alaska" without trying to
-// capture every fjord.
-const ALASKA_OUTLINE: [number, number][] = [
-  [0.020, 0.22], [0.030, 0.12], [0.060, 0.04], [0.130, 0.03], [0.170, 0.05],
-  [0.205, 0.10], [0.215, 0.16], [0.190, 0.20], [0.205, 0.24], [0.220, 0.30],
-  [0.190, 0.32], [0.180, 0.26], [0.155, 0.22], [0.110, 0.22], [0.060, 0.26],
-];
-
-// Hawaii — four major islands as filled ellipses, increasing in size and
-// drifting south-east. Sizes are absolute pixels.
-interface Island { rx: number; ry: number; cx: number; cy: number }
-const HAWAII_ISLANDS: Island[] = [
-  { cx: 0.025, cy: 0.84, rx: 2.5, ry: 1.5 }, // Kauai
-  { cx: 0.060, cy: 0.86, rx: 3.0, ry: 2.0 }, // Oahu
-  { cx: 0.100, cy: 0.89, rx: 3.5, ry: 2.0 }, // Maui group
-  { cx: 0.155, cy: 0.93, rx: 5.0, ry: 3.0 }, // Big Island
-];
 
 function drawUsMap(ctx: CanvasRenderingContext2D, w: number, h: number): void {
   ctx.fillStyle = "black";
@@ -154,13 +164,6 @@ function drawUsMap(ctx: CanvasRenderingContext2D, w: number, h: number): void {
   });
   ctx.closePath();
   ctx.stroke();
-
-  // Hawaii — filled island ovals (4-bit greyscale tolerates this fine).
-  HAWAII_ISLANDS.forEach(({ cx, cy, rx, ry }) => {
-    ctx.beginPath();
-    ctx.ellipse(cx * w, cy * h, rx, ry, 0, 0, Math.PI * 2);
-    ctx.fill();
-  });
 }
 
 function buildHudFields() {
@@ -216,7 +219,6 @@ async function sendMapImage(bridge: Bridge): Promise<ImageRawDataUpdateResult> {
   if (!ctx) throw new Error("no 2d context");
   drawUsMap(ctx, MAP_W, MAP_H);
 
-  // Mirror to phone preview so the user can compare what the lens shows.
   if (mapEl) {
     const pctx = mapEl.getContext("2d");
     if (pctx) drawUsMap(pctx, mapEl.width, mapEl.height);
@@ -262,7 +264,6 @@ async function start(): Promise<void> {
   renderPhone();
   setInterval(renderPhone, 1000);
 
-  // Always render the phone-side map preview, even without a bridge.
   if (mapEl) {
     const pctx = mapEl.getContext("2d");
     if (pctx) drawUsMap(pctx, mapEl.width, mapEl.height);
@@ -298,7 +299,6 @@ async function start(): Promise<void> {
     }
   });
 
-  // Root-page double-tap → system exit dialog (exitMode 1).
   bridge.onEvenHubEvent(async (event) => {
     const e = event.textEvent ?? event.sysEvent;
     if (!e) return;

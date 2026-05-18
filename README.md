@@ -6,16 +6,15 @@ Tiny Even Hub app that displays the current time across the six US time zones on
 
 Two containers on the 576×288 HUD canvas:
 
-- **Left half** — vertical list of the six US zones with their current local time, 24-hour format, minute precision. Refreshed every minute, aligned to `:00` seconds:
+- **Left half** — vertical list of five US zones (Hawaii excluded) with day-of-week and current local time, 24-hour format, minute precision. The day of week makes the date roll-over across zones visible at a glance:
   ```
-  Eastern   14:23
-  Central   13:23
-  Mountain  12:23
-  Pacific   11:23
-  Alaska    10:23
-  Hawaii    08:23
+  Eastern   Sat 14:23
+  Central   Sat 13:23
+  Mountain  Sat 12:23
+  Pacific   Sat 11:23
+  Alaska    Sat 10:23
   ```
-- **Right half** — a stylised US outline rendered in JS via the HTML `canvas` API, exported as PNG, and sent to the lens via `bridge.updateImageRawData`. ~16-vertex contiguous-48 polygon plus an Alaska inset quad and three Hawaii dots. Image container is bounded by the SDK at 200×100 px and 4-bit greyscale.
+- **Right half** — US outline rendered in JS via the HTML `canvas` API, exported as PNG, sent to the lens via `bridge.updateImageRawData`. ~130-vertex hand-traced contiguous-48 polygon (Great Lakes indent, Florida loop, Texas/Brownsville bulge, Pacific NW peninsula) plus a 15-vertex Alaska in the top-left with the SE panhandle. The image container is capped by the SDK at 200×100 px, 4-bit greyscale.
 
 ## Why the outline is hand-drawn
 
