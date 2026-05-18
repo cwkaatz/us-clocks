@@ -4,20 +4,22 @@ Tiny Even Hub app that displays the current time across the six US time zones on
 
 ## What's shown
 
-Six text labels positioned geographically on the 576×288 HUD canvas, suggesting a US map:
+Two containers on the 576×288 HUD canvas:
 
-```
-AK 14:23
-                        ET 14:23
-            CT 13:23
-       MT 12:23
-  PT 11:23
-HI 08:23
-```
+- **Left half** — vertical list of the six US zones with their current local time, 24-hour format, minute precision. Refreshed every minute, aligned to `:00` seconds:
+  ```
+  Eastern   14:23
+  Central   13:23
+  Mountain  12:23
+  Pacific   11:23
+  Alaska    10:23
+  Hawaii    08:23
+  ```
+- **Right half** — a stylised US outline rendered in JS via the HTML `canvas` API, exported as PNG, and sent to the lens via `bridge.updateImageRawData`. ~16-vertex contiguous-48 polygon plus an Alaska inset quad and three Hawaii dots. Image container is bounded by the SDK at 200×100 px and 4-bit greyscale.
 
-24-hour format, minute precision. Refreshed every minute (aligned to `:00` seconds). Alaska top-left and Hawaii bottom-left mimic the inset boxes from classic US maps.
+## Why the outline is hand-drawn
 
-A future iteration may add a real outline drawing via the SDK's `updateImageRawData` image-container API (max 200×100 px, 4-bit greyscale per the platform docs).
+The image-container API only ships placeholder geometry in `createStartUpPageContainer`; the actual pixels must arrive via `updateImageRawData` after startup. Doing the drawing in canvas at runtime means there's no asset to ship in the `.ehpk` — the map is regenerated each launch from a list of lon/lat coordinates.
 
 ## Gestures
 
