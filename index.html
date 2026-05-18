@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>US Clocks</title>
+    <style>
+      :root { color-scheme: light dark; }
+      body {
+        font-family: -apple-system, system-ui, sans-serif;
+        margin: 0;
+        padding: 1.25rem;
+        max-width: 28rem;
+        margin-inline: auto;
+      }
+      header { display: flex; justify-content: space-between; align-items: baseline; margin: 0 0 0.5rem; }
+      h1 { font-size: 1.25rem; margin: 0; }
+      .version { color: #888; font-size: 0.75rem; font-variant-numeric: tabular-nums; }
+      .status { font-size: 0.875rem; margin: 0 0 0.75rem; }
+      .hint { color: #666; font-size: 0.8125rem; margin: 0 0 1rem; }
+      pre {
+        background: rgba(0,0,0,0.06);
+        padding: 0.75rem 1rem;
+        border-radius: 8px;
+        font-size: 1rem;
+        line-height: 1.5;
+        font-variant-numeric: tabular-nums;
+        white-space: pre;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>US Clocks</h1>
+      <span class="version" id="version"></span>
+    </header>
+    <p class="status" id="status">Initialising…</p>
+    <p class="hint">Time across six US zones, updated every minute. Double-tap on the glasses to exit.</p>
+    <pre id="clocks"></pre>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
