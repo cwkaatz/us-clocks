@@ -43,7 +43,78 @@ const statusEl = document.getElementById("status") as HTMLParagraphElement;
 const clocksEl = document.getElementById("clocks") as HTMLPreElement;
 const mapEl = document.getElementById("map") as HTMLCanvasElement | null;
 const versionEl = document.getElementById("version") as HTMLSpanElement | null;
+const dstStatusEl = document.getElementById("dst-status") as HTMLParagraphElement | null;
+const dstNextEl = document.getElementById("dst-next") as HTMLParagraphElement | null;
+const factEl = document.getElementById("fact") as HTMLParagraphElement | null;
 if (versionEl) versionEl.textContent = `v${__APP_VERSION__}`;
+
+const DST_FACTS = [
+  "DST in the US starts on the second Sunday of March and ends on the first Sunday of November.",
+  "Arizona (except the Navajo Nation) doesn't observe daylight saving time.",
+  "Hawaii doesn't observe DST either — Hawaii Standard Time year-round since 1947.",
+  "The US first adopted daylight saving in 1918, as a wartime energy measure.",
+  "Indiana didn't fully adopt DST statewide until 2006.",
+  "Standard time zones were created in 1883 by US railroads to coordinate train schedules.",
+  "Most of the world's population lives in countries that never change their clocks.",
+  "Spring forward, fall back: clocks jump from 2 AM to 3 AM in spring, and 2 AM back to 1 AM in fall.",
+  "The European Parliament voted to abolish DST in 2019 — member states haven't agreed on how to implement it.",
+  "Multiple US Sunshine Protection Act bills have proposed making DST permanent.",
+  "DST shifts an hour of evening daylight to the morning — it doesn't add daylight, only moves it.",
+  "Russia abolished DST in 2011, then reversed course in 2014 — and is now on permanent standard time.",
+];
+
+function nthDayOfWeekInMonth(year: number, month: number, dayOfWeek: number, n: number): Date {
+  const first = new Date(year, month, 1);
+  const offset = (dayOfWeek - first.getDay() + 7) % 7;
+  return new Date(year, month, 1 + offset + (n - 1) * 7);
+}
+
+function nextDstTransition(now: Date): { date: Date; type: "starts" | "ends" } {
+  const y = now.getFullYear();
+  const dstStart = nthDayOfWeekInMonth(y, 2, 0, 2); // 2nd Sunday of March
+  const dstEnd = nthDayOfWeekInMonth(y, 10, 0, 1); // 1st Sunday of November
+  if (now < dstStart) return { date: dstStart, type: "starts" };
+  if (now < dstEnd) return { date: dstEnd, type: "ends" };
+  return { date: nthDayOfWeekInMonth(y + 1, 2, 0, 2), type: "starts" };
+}
+
+function getZoneAbbr(tz: string, when: Date): string {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: tz,
+    timeZoneName: "short",
+  }).formatToParts(when);
+  return parts.find((p) => p.type === "timeZoneName")?.value ?? "";
+}
+
+function renderDstInfo(): void {
+  if (!dstStatusEl || !dstNextEl) return;
+  const now = new Date();
+  const abbrs = ZONES.map((z) => getZoneAbbr(z.tz, now));
+  const allDst = abbrs.every((a) => a.endsWith("DT"));
+  const allStd = abbrs.every((a) => a.endsWith("ST"));
+  if (allDst) {
+    dstStatusEl.textContent = `All five zones are currently observing daylight saving time (${abbrs.join(", ")}).`;
+  } else if (allStd) {
+    dstStatusEl.textContent = `All five zones are currently on standard time (${abbrs.join(", ")}).`;
+  } else {
+    dstStatusEl.textContent = `Currently: ${ZONES.map((z, i) => `${z.label} ${abbrs[i]}`).join(", ")}.`;
+  }
+  const next = nextDstTransition(now);
+  const dateStr = next.date.toLocaleDateString("en-US", {
+    weekday: "long",
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+  });
+  dstNextEl.textContent = `DST ${next.type === "starts" ? "starts" : "ends"} on ${dateStr}.`;
+}
+
+let factIndex = 0;
+function renderFact(): void {
+  if (!factEl) return;
+  factEl.textContent = DST_FACTS[factIndex];
+  factIndex = (factIndex + 1) % DST_FACTS.length;
+}
 
 function formatDayTime(tz: string, when: Date): string {
   const day = new Intl.DateTimeFormat("en-US", {
@@ -269,6 +340,14 @@ async function waitForBridgeWithTimeout(ms = 1500): Promise<Bridge | null> {
 async function start(): Promise<void> {
   renderPhone();
   setInterval(renderPhone, 1000);
+
+  renderDstInfo();
+  // DST status only flips a couple of times per year — checking each minute is
+  // plenty (cheap, catches the flip if the wearer leaves the page open).
+  setInterval(renderDstInfo, 60_000);
+
+  renderFact();
+  setInterval(renderFact, 8_000);
 
   if (mapEl) {
     const pctx = mapEl.getContext("2d");

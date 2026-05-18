@@ -41,6 +41,29 @@
         max-width: 100%;
         height: auto;
       }
+      .info {
+        margin-top: 1.25rem;
+        padding: 0.875rem 1rem;
+        background: rgba(0,0,0,0.04);
+        border-radius: 8px;
+      }
+      .info h2 {
+        font-size: 0.75rem;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: #888;
+        margin: 0 0 0.5rem;
+      }
+      .info p {
+        margin: 0.25rem 0;
+        font-size: 0.875rem;
+        line-height: 1.4;
+      }
+      .fact {
+        font-style: italic;
+        color: #555;
+        min-height: 2.5em;
+      }
     </style>
   </head>
   <body>
@@ -49,11 +72,22 @@
       <span class="version" id="version"></span>
     </header>
     <p class="status" id="status">Initialising…</p>
-    <p class="hint">Time across six US zones, updated every minute. Double-tap on the glasses to exit.</p>
+    <p class="hint">Time across five US zones, updated every minute. Swipe on the glasses to switch views. Double-tap to exit.</p>
     <div class="lens-preview">
       <pre id="clocks"></pre>
       <canvas id="map" width="200" height="100" aria-label="US map preview"></canvas>
     </div>
+
+    <section class="info">
+      <h2>Daylight Saving</h2>
+      <p id="dst-status">…</p>
+      <p id="dst-next">…</p>
+    </section>
+
+    <section class="info">
+      <h2>Did you know?</h2>
+      <p class="fact" id="fact">…</p>
+    </section>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>
