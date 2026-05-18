@@ -4,16 +4,20 @@ Tiny Even Hub app that displays the current time across the six US time zones on
 
 ## What's shown
 
+Six text labels positioned geographically on the 576×288 HUD canvas, suggesting a US map:
+
 ```
-Eastern   14:23
-Central   13:23
-Mountain  12:23
-Pacific   11:23
-Alaska    10:23
-Hawaii    08:23
+AK 14:23
+                        ET 14:23
+            CT 13:23
+       MT 12:23
+  PT 11:23
+HI 08:23
 ```
 
-24-hour format, minute precision. Refreshed every minute (aligned to `:00` seconds).
+24-hour format, minute precision. Refreshed every minute (aligned to `:00` seconds). Alaska top-left and Hawaii bottom-left mimic the inset boxes from classic US maps.
+
+A future iteration may add a real outline drawing via the SDK's `updateImageRawData` image-container API (max 200×100 px, 4-bit greyscale per the platform docs).
 
 ## Gestures
 

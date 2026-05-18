@@ -12,23 +12,27 @@ type Bridge = NonNullable<Awaited<ReturnType<typeof waitForEvenAppBridge>>>;
 
 declare const __APP_VERSION__: string;
 
+// Positions chosen to suggest a US map on the 576×288 HUD canvas.
+// Each zone is one TextContainer ("ABBR  HH:MM"). Alaska top-left and
+// Hawaii bottom-left mimic the inset boxes used on classic US maps.
 interface Zone {
-  label: string;
+  id: number;
+  abbr: string;
   tz: string;
+  x: number;
+  y: number;
 }
 
+const W = 140;
+const H = 36;
 const ZONES: Zone[] = [
-  { label: "Eastern", tz: "America/New_York" },
-  { label: "Central", tz: "America/Chicago" },
-  { label: "Mountain", tz: "America/Denver" },
-  { label: "Pacific", tz: "America/Los_Angeles" },
-  { label: "Alaska", tz: "America/Anchorage" },
-  { label: "Hawaii", tz: "Pacific/Honolulu" },
+  { id: 1, abbr: "AK", tz: "America/Anchorage",     x: 30,  y: 28 },
+  { id: 2, abbr: "PT", tz: "America/Los_Angeles",   x: 110, y: 155 },
+  { id: 3, abbr: "MT", tz: "America/Denver",        x: 218, y: 138 },
+  { id: 4, abbr: "CT", tz: "America/Chicago",       x: 330, y: 118 },
+  { id: 5, abbr: "ET", tz: "America/New_York",      x: 430, y: 108 },
+  { id: 6, abbr: "HI", tz: "Pacific/Honolulu",      x: 30,  y: 220 },
 ];
-
-const LABEL_WIDTH = Math.max(...ZONES.map((z) => z.label.length));
-const TEXT_CONTAINER_ID = 1;
-const TEXT_CONTAINER_NAME = "clocks";
 
 const statusEl = document.getElementById("status") as HTMLParagraphElement;
 const clocksEl = document.getElementById("clocks") as HTMLPreElement;
@@ -44,27 +48,48 @@ function formatTime(tz: string, when: Date): string {
   });
 }
 
-function buildContent(): string {
-  const now = new Date();
-  return ZONES.map((z) => `${z.label.padEnd(LABEL_WIDTH + 1)} ${formatTime(z.tz, now)}`).join("\n");
+function labelFor(zone: Zone, when: Date): string {
+  return `${zone.abbr}  ${formatTime(zone.tz, when)}`;
 }
 
 function renderPhone(): void {
-  clocksEl.textContent = buildContent();
+  const now = new Date();
+  // Phone view stays as a vertical list — full names so it's readable.
+  const widest = Math.max(...ZONES.map((z) => zoneName(z.abbr).length));
+  clocksEl.textContent = ZONES.map(
+    (z) => `${zoneName(z.abbr).padEnd(widest)}  ${formatTime(z.tz, now)}`,
+  ).join("\n");
+}
+
+function zoneName(abbr: string): string {
+  switch (abbr) {
+    case "AK": return "Alaska";
+    case "HI": return "Hawaii";
+    case "PT": return "Pacific";
+    case "MT": return "Mountain";
+    case "CT": return "Central";
+    case "ET": return "Eastern";
+    default:   return abbr;
+  }
 }
 
 function buildHudFields() {
-  const text = new TextContainerProperty({
-    xPosition: 50,
-    yPosition: 20,
-    width: 476,
-    height: 248,
-    containerID: TEXT_CONTAINER_ID,
-    containerName: TEXT_CONTAINER_NAME,
-    content: buildContent(),
-    isEventCapture: 1,
-  });
-  return { containerTotalNum: 1, textObject: [text] };
+  const now = new Date();
+  const textObject = ZONES.map(
+    (z) =>
+      new TextContainerProperty({
+        xPosition: z.x,
+        yPosition: z.y,
+        width: W,
+        height: H,
+        containerID: z.id,
+        containerName: `zone-${z.abbr.toLowerCase()}`,
+        content: labelFor(z, now),
+        // First zone captures events so we can detect double-tap → exit.
+        isEventCapture: z.id === 1 ? 1 : 0,
+      }),
+  );
+  return { containerTotalNum: ZONES.length, textObject };
 }
 
 async function ensureHud(bridge: Bridge): Promise<"created" | "rebuilt"> {
@@ -78,16 +103,20 @@ async function ensureHud(bridge: Bridge): Promise<"created" | "rebuilt"> {
   throw new Error(`create=${createResult}, rebuild=false`);
 }
 
-async function pushToHud(bridge: Bridge): Promise<void> {
-  await bridge.textContainerUpgrade(
-    new TextContainerUpgrade({
-      containerID: TEXT_CONTAINER_ID,
-      containerName: TEXT_CONTAINER_NAME,
-      contentOffset: 0,
-      contentLength: 0,
-      content: buildContent(),
-    }),
-  );
+async function pushTimes(bridge: Bridge): Promise<void> {
+  const now = new Date();
+  // Serialize the updates — the SDK docs warn against concurrent sends.
+  for (const z of ZONES) {
+    await bridge.textContainerUpgrade(
+      new TextContainerUpgrade({
+        containerID: z.id,
+        containerName: `zone-${z.abbr.toLowerCase()}`,
+        contentOffset: 0,
+        contentLength: 0,
+        content: labelFor(z, now),
+      }),
+    );
+  }
 }
 
 function delayUntilNextMinute(): number {
@@ -114,7 +143,6 @@ async function waitForBridgeWithTimeout(ms = 1500): Promise<Bridge | null> {
 
 async function start(): Promise<void> {
   renderPhone();
-  // Keep the phone view alive even without a bridge — useful for desktop preview.
   setInterval(renderPhone, 1000);
 
   const bridge = await waitForBridgeWithTimeout();
@@ -126,31 +154,26 @@ async function start(): Promise<void> {
 
   try {
     const mode = await ensureHud(bridge);
-    statusEl.textContent = `Bridge ready. HUD ${mode}. Updating every minute.`;
+    statusEl.textContent = `Bridge ready. HUD ${mode}. ${ZONES.length} zones, refreshed each minute.`;
   } catch (err) {
     statusEl.textContent = `HUD setup failed: ${err}`;
     return;
   }
 
-  // Minute-aligned refresh of the HUD. The phone view ticks every second
-  // separately; both share the same buildContent() source.
   scheduleNextUpdate(async () => {
     try {
-      await pushToHud(bridge);
+      await pushTimes(bridge);
     } catch {
       /* ignore — next tick retries */
     }
   });
 
-  // Root-page double-tap MUST trigger the system exit dialog (mode 1).
-  // Per QA review rules, immediate exit (mode 0) on the root page is
-  // auto-rejected.
+  // Root-page double-tap → system exit dialog (exitMode 1). Per QA rules
+  // exitMode 0 is auto-rejected on root pages.
   bridge.onEvenHubEvent(async (event) => {
     const e = event.textEvent ?? event.sysEvent;
     if (!e) return;
     if (e.eventType === OsEventTypeList.DOUBLE_CLICK_EVENT) {
-      // exitMode 1 = system exit confirmation dialog. Required on root pages
-      // per QA review rules; mode 0 (immediate exit) is auto-rejected there.
       await bridge.shutDownPageContainer(1);
     }
   });
