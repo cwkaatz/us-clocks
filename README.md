@@ -6,9 +6,9 @@ Tiny Even Hub app that displays the current time across the six US time zones on
 
 Three views cycle on temple swipes:
 
-1. **Column** — single centered text container with all five zones (default on launch).
+1. **Column** — single centered text container with all six zones (default on launch).
 2. **Positions** — five small labels placed at the approximate geographic position of each zone on the canvas.
-3. **Map** — five-row time list on the left, vertically centered with the US outline image on the right.
+3. **Map** — six-row time list on the left, vertically centered with the US outline image on the right. Hawaii is intentionally absent from the silhouette (it would sit off the contiguous mainland projection), but it's in the list.
 
 Swipe down = next view, swipe up = previous, double-tap = exit (system dialog).
 

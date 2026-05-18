@@ -32,6 +32,7 @@ const ZONES: Zone[] = [
   { label: "Mountain", abbr: "MT",  tz: "America/Denver",       posX: 215, posY: 125 },
   { label: "Pacific",  abbr: "PT",  tz: "America/Los_Angeles",  posX: 100, posY: 165 },
   { label: "Alaska",   abbr: "AKT", tz: "America/Anchorage",    posX: 30,  posY: 235 },
+  { label: "Hawaii",   abbr: "HST", tz: "Pacific/Honolulu",     posX: 210, posY: 235 },
 ];
 
 const MAP_W = 200;
@@ -90,14 +91,18 @@ function renderDstInfo(): void {
   if (!dstStatusEl || !dstNextEl) return;
   const now = new Date();
   const abbrs = ZONES.map((z) => getZoneAbbr(z.tz, now));
-  const allDst = abbrs.every((a) => a.endsWith("DT"));
-  const allStd = abbrs.every((a) => a.endsWith("ST"));
-  if (allDst) {
-    dstStatusEl.textContent = `All five zones are currently observing daylight saving time (${abbrs.join(", ")}).`;
-  } else if (allStd) {
-    dstStatusEl.textContent = `All five zones are currently on standard time (${abbrs.join(", ")}).`;
+  const dstAbbrs: string[] = [];
+  const stdAbbrs: string[] = [];
+  for (const a of abbrs) {
+    if (a.endsWith("DT")) dstAbbrs.push(a);
+    else stdAbbrs.push(a);
+  }
+  if (dstAbbrs.length === 0) {
+    dstStatusEl.textContent = `All ${ZONES.length} zones are currently on standard time (${stdAbbrs.join(", ")}).`;
+  } else if (stdAbbrs.length === 0) {
+    dstStatusEl.textContent = `All ${ZONES.length} zones are currently observing daylight saving time (${dstAbbrs.join(", ")}).`;
   } else {
-    dstStatusEl.textContent = `Currently: ${ZONES.map((z, i) => `${z.label} ${abbrs[i]}`).join(", ")}.`;
+    dstStatusEl.textContent = `Daylight saving time observed in: ${dstAbbrs.join(", ")}. Standard time year-round / today: ${stdAbbrs.join(", ")}.`;
   }
   const next = nextDstTransition(now);
   const dateStr = next.date.toLocaleDateString("en-US", {
@@ -177,11 +182,12 @@ const VIEWS: ViewKind[] = ["column", "positions", "map"];
 
 function buildColumnView() {
   // Single text container, full-width-ish, centered vertically.
+  // Sized for six rows.
   const list = new TextContainerProperty({
     xPosition: 140,
-    yPosition: 60,
+    yPosition: 44,
     width: 360,
-    height: 180,
+    height: 200,
     containerID: 1,
     containerName: "list",
     content: buildListContent(),
@@ -217,12 +223,13 @@ function buildMapView() {
   // List on the left, image (map) on the right. List is vertically centered
   // with the map so they read as a single composition.
   // Map: y=94..194 (center y=144).
-  // List: 5 rows, ~28 px each ≈ 140 px tall. Place y so center matches map.
+  // List: 6 rows, ~28 px each ≈ 170 px tall. Place y so center matches map
+  // center as closely as possible (60 + 85 = 145).
   const list = new TextContainerProperty({
     xPosition: 20,
-    yPosition: 74,
+    yPosition: 60,
     width: 260,
-    height: 140,
+    height: 170,
     containerID: 1,
     containerName: "list",
     content: buildListContent(),
