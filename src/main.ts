@@ -65,62 +65,74 @@ function renderPhone(): void {
   clocksEl.textContent = buildListContent();
 }
 
-// Rough US outline drawn at any (w,h). Coordinates are simplified — about
-// 16 vertices for the contiguous 48, a small inset quad for Alaska, three
-// dots for Hawaii. Enough to read as "USA" on the lens.
+// Higher-fidelity US outline. The contiguous 48 is a ~70-vertex polygon
+// projected from lon/lat; Alaska is a hand-traced quad-ish with a panhandle
+// (canvas-relative coords); Hawaii is four filled ellipses of graduating size
+// arranged NW→SE like the major islands.
 function projectUs(lon: number, lat: number, w: number, h: number): [number, number] {
   const xL = -125;
   const xR = -67;
-  const yT = 49;
+  const yT = 49.5;
   const yB = 24;
   const nx = (lon - xL) / (xR - xL);
   const ny = (yT - lat) / (yT - yB);
-  // Contiguous 48 occupies x:[0.20w, 0.98w], y:[0.25h, 0.85h] of the canvas,
-  // leaving room top-left for Alaska and bottom-left for Hawaii.
-  return [(0.2 + nx * 0.78) * w, (0.25 + ny * 0.6) * h];
+  // Contiguous 48 occupies x:[0.25w, 1.0w], y:[0.05h, 0.85h]; AK top-left,
+  // HI bottom-left.
+  return [(0.25 + nx * 0.74) * w, (0.05 + ny * 0.78) * h];
 }
 
 const US_OUTLINE: [number, number][] = [
-  [-124, 48],
-  [-95, 49],
-  [-77, 45],
-  [-67, 47],
-  [-70, 42],
-  [-75, 39],
-  [-80, 27],
-  [-81, 25],
-  [-84, 30],
-  [-89, 30],
-  [-94, 29],
-  [-97, 26],
-  [-103, 29],
-  [-117, 32],
-  [-122, 38],
-  [-124, 40],
+  // Northern border, west → east
+  [-123, 48.5], [-122.5, 49], [-114, 49], [-104, 49], [-97.2, 49], [-94, 49],
+  [-89, 48], [-83.5, 45.8], [-83, 41.7], [-80, 42.5], [-79, 43.3],
+  [-77.5, 43.5], [-76, 44], [-74, 44.5], [-71, 45], [-69.2, 47.4], [-67.5, 47],
+  // Atlantic, north → south
+  [-67, 44.8], [-70.5, 43.6], [-70.7, 42.5], [-70.0, 41.7], [-71, 41.3],
+  [-72.5, 41], [-74, 40.5], [-74.5, 39.3], [-75.5, 38], [-76, 36.8],
+  [-75.5, 35.5], [-77, 34.4], [-79, 33], [-81, 31.5], [-81.5, 30.5],
+  // Florida loop
+  [-80.5, 28.5], [-80.2, 26], [-80.5, 25], [-81.8, 24.5], [-82.5, 27],
+  [-83, 29.5],
+  // Gulf, east → west
+  [-84.5, 30], [-87, 30.3], [-88.5, 30.3], [-89.5, 29], [-91.5, 29.3],
+  [-93.8, 29.5], [-95, 29.2], [-97, 27.6], [-97.4, 26],
+  // Mexican border, east → west
+  [-99, 27], [-100, 28.5], [-102, 29.7], [-103.5, 29], [-104.5, 30],
+  [-106.5, 31.8], [-108.2, 31.3], [-111, 31.3], [-114.7, 32.5],
+  // Pacific, south → north
+  [-117, 32.5], [-118, 33.8], [-119.5, 34.4], [-120.5, 34.5], [-121, 35.5],
+  [-121.7, 36.5], [-122, 37], [-122.5, 37.8], [-123, 38.3], [-123.5, 38.9],
+  [-124.3, 40.4], [-124, 41.7], [-124.2, 43], [-124.1, 44.5], [-124, 46.3],
+  [-124, 47.5], [-124.7, 48.4],
 ];
 
+// Alaska in canvas-relative coords (0..1). Rough mainland blob with a
+// panhandle on the SE side — enough to read as "Alaska" without trying to
+// capture every fjord.
 const ALASKA_OUTLINE: [number, number][] = [
-  [0.02, 0.22],
-  [0.1, 0.06],
-  [0.18, 0.12],
-  [0.16, 0.2],
-  [0.06, 0.3],
+  [0.020, 0.22], [0.030, 0.12], [0.060, 0.04], [0.130, 0.03], [0.170, 0.05],
+  [0.205, 0.10], [0.215, 0.16], [0.190, 0.20], [0.205, 0.24], [0.220, 0.30],
+  [0.190, 0.32], [0.180, 0.26], [0.155, 0.22], [0.110, 0.22], [0.060, 0.26],
 ];
 
-const HAWAII_DOTS: [number, number][] = [
-  [0.04, 0.92],
-  [0.08, 0.92],
-  [0.12, 0.92],
+// Hawaii — four major islands as filled ellipses, increasing in size and
+// drifting south-east. Sizes are absolute pixels.
+interface Island { rx: number; ry: number; cx: number; cy: number }
+const HAWAII_ISLANDS: Island[] = [
+  { cx: 0.025, cy: 0.84, rx: 2.5, ry: 1.5 }, // Kauai
+  { cx: 0.060, cy: 0.86, rx: 3.0, ry: 2.0 }, // Oahu
+  { cx: 0.100, cy: 0.89, rx: 3.5, ry: 2.0 }, // Maui group
+  { cx: 0.155, cy: 0.93, rx: 5.0, ry: 3.0 }, // Big Island
 ];
 
 function drawUsMap(ctx: CanvasRenderingContext2D, w: number, h: number): void {
   ctx.fillStyle = "black";
   ctx.fillRect(0, 0, w, h);
   ctx.strokeStyle = "white";
-  ctx.lineWidth = 2;
+  ctx.fillStyle = "white";
+  ctx.lineWidth = 1.5;
   ctx.lineJoin = "round";
   ctx.lineCap = "round";
-  ctx.fillStyle = "white";
 
   // Contiguous 48
   ctx.beginPath();
@@ -143,10 +155,10 @@ function drawUsMap(ctx: CanvasRenderingContext2D, w: number, h: number): void {
   ctx.closePath();
   ctx.stroke();
 
-  // Hawaii — three dots
-  HAWAII_DOTS.forEach(([rx, ry]) => {
+  // Hawaii — filled island ovals (4-bit greyscale tolerates this fine).
+  HAWAII_ISLANDS.forEach(({ cx, cy, rx, ry }) => {
     ctx.beginPath();
-    ctx.arc(rx * w, ry * h, 2, 0, 2 * Math.PI);
+    ctx.ellipse(cx * w, cy * h, rx, ry, 0, 0, Math.PI * 2);
     ctx.fill();
   });
 }
