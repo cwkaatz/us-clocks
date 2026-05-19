@@ -135,9 +135,26 @@ function formatDayTime(tz: string, when: Date): string {
   return `${day} ${time}`;
 }
 
+const LOCAL_LABEL = "Local";
+const LOCAL_TZ = Intl.DateTimeFormat().resolvedOptions().timeZone;
+
+function formatLocalDayTime(when: Date): string {
+  const day = new Intl.DateTimeFormat("en-US", { weekday: "short" }).format(when);
+  const time = when.toLocaleTimeString("en-US", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+  return `${day} ${time}`;
+}
+
 function buildListContent(when: Date = new Date()): string {
-  const widest = Math.max(...ZONES.map((z) => z.label.length));
-  return ZONES.map((z) => `${z.label.padEnd(widest)}  ${formatDayTime(z.tz, when)}`).join("\n");
+  const widest = Math.max(LOCAL_LABEL.length, ...ZONES.map((z) => z.label.length));
+  const localRow = `${LOCAL_LABEL.padEnd(widest)}  ${formatLocalDayTime(when)}`;
+  const zoneRows = ZONES.map(
+    (z) => `${z.label.padEnd(widest)}  ${formatDayTime(z.tz, when)}`,
+  );
+  return [localRow, ...zoneRows].join("\n");
 }
 
 function renderPhone(): void {
@@ -221,9 +238,9 @@ function buildColumnView() {
   // Sized for six rows.
   const list = new TextContainerProperty({
     xPosition: 140,
-    yPosition: 44,
+    yPosition: 30,
     width: 360,
-    height: 200,
+    height: 232,
     containerID: 1,
     containerName: "list",
     content: buildListContent(),
@@ -263,9 +280,9 @@ function buildMapView() {
   // center as closely as possible (60 + 85 = 145).
   const list = new TextContainerProperty({
     xPosition: 20,
-    yPosition: 60,
+    yPosition: 50,
     width: 260,
-    height: 170,
+    height: 200,
     containerID: 1,
     containerName: "list",
     content: buildListContent(),
