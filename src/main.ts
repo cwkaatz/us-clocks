@@ -121,40 +121,149 @@ function renderFact(): void {
   factIndex = (factIndex + 1) % DST_FACTS.length;
 }
 
-function formatDayTime(tz: string, when: Date): string {
-  const day = new Intl.DateTimeFormat("en-US", {
-    timeZone: tz,
-    weekday: "short",
-  }).format(when);
-  const time = when.toLocaleTimeString("en-US", {
-    timeZone: tz,
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  });
-  return `${day} ${time}`;
+// ---- Settings & persistence ----
+
+type TimeFormat = "24h" | "12h";
+
+interface Settings {
+  timeFormat: TimeFormat;
 }
+
+const DEFAULT_SETTINGS: Settings = { timeFormat: "24h" };
+const SETTINGS_KEY = "us-clocks-settings-v1";
+const VIEW_PREF_KEY = "us-clocks-last-view-v1";
+
+let settings: Settings = { ...DEFAULT_SETTINGS };
+
+function loadSettingsSync(): Settings {
+  try {
+    const raw = localStorage.getItem(SETTINGS_KEY);
+    if (raw) return { ...DEFAULT_SETTINGS, ...JSON.parse(raw) };
+  } catch {
+    /* swallow */
+  }
+  return { ...DEFAULT_SETTINGS };
+}
+
+async function saveSettings(s: Settings, bridge: Bridge | null): Promise<void> {
+  const json = JSON.stringify(s);
+  try { localStorage.setItem(SETTINGS_KEY, json); } catch { /* swallow */ }
+  if (bridge) {
+    try { await bridge.setLocalStorage(SETTINGS_KEY, json); } catch { /* swallow */ }
+  }
+}
+
+function loadLastViewSync(): ViewKind | null {
+  try {
+    const raw = localStorage.getItem(VIEW_PREF_KEY);
+    if (raw && (VIEWS as readonly string[]).includes(raw)) return raw as ViewKind;
+  } catch {
+    /* swallow */
+  }
+  return null;
+}
+
+async function saveLastView(view: ViewKind, bridge: Bridge | null): Promise<void> {
+  try { localStorage.setItem(VIEW_PREF_KEY, view); } catch { /* swallow */ }
+  if (bridge) {
+    try { await bridge.setLocalStorage(VIEW_PREF_KEY, view); } catch { /* swallow */ }
+  }
+}
+
+// ---- Time / zone helpers ----
 
 const LOCAL_LABEL = "Local";
 const LOCAL_TZ = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
-function formatLocalDayTime(when: Date): string {
-  const day = new Intl.DateTimeFormat("en-US", { weekday: "short" }).format(when);
-  const time = when.toLocaleTimeString("en-US", {
-    hour: "2-digit",
-    minute: "2-digit",
+function getHourIn(tz: string, when: Date): number {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: tz,
     hour12: false,
-  });
-  return `${day} ${time}`;
+    hour: "2-digit",
+  }).formatToParts(when);
+  const raw = Number(parts.find((p) => p.type === "hour")?.value);
+  // Older engines emit "24" for midnight with hour12:false; normalise to 0.
+  return raw === 24 ? 0 : raw;
 }
 
-function buildListContent(when: Date = new Date()): string {
-  const widest = Math.max(LOCAL_LABEL.length, ...ZONES.map((z) => z.label.length));
-  const localRow = `${LOCAL_LABEL.padEnd(widest)}  ${formatLocalDayTime(when)}`;
-  const zoneRows = ZONES.map(
-    (z) => `${z.label.padEnd(widest)}  ${formatDayTime(z.tz, when)}`,
+// UTC offset (in minutes) of the wall-clock time in `tz` at `when`.
+function zoneOffsetMinutes(tz: string, when: Date): number {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: tz,
+    hour12: false,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  }).formatToParts(when);
+  const get = (t: string) => Number(parts.find((p) => p.type === t)?.value);
+  const hour = get("hour") === 24 ? 0 : get("hour");
+  const asUtc = Date.UTC(
+    get("year"),
+    get("month") - 1,
+    get("day"),
+    hour,
+    get("minute"),
+    get("second"),
   );
-  return [localRow, ...zoneRows].join("\n");
+  return Math.round((asUtc - when.getTime()) / 60000);
+}
+
+function formatOffsetVsLocal(tz: string, when: Date): string {
+  const diff = zoneOffsetMinutes(tz, when) - zoneOffsetMinutes(LOCAL_TZ, when);
+  const hours = Math.round(diff / 60);
+  if (hours === 0) return " 0h";
+  const sign = hours > 0 ? "+" : "-";
+  return `${sign}${Math.abs(hours)}h`;
+}
+
+// "*" = business hours (09:00–16:59), "." = awake but off (07:00–08:59,
+// 17:00–21:59), "z" = sleep window (22:00–06:59).
+function statusGlyph(tz: string, when: Date): string {
+  const h = getHourIn(tz, when);
+  if (h >= 9 && h < 17) return "*";
+  if (h >= 22 || h < 7) return "z";
+  return ".";
+}
+
+function formatDayTime(tz: string | null, when: Date): string {
+  const dayFmt = new Intl.DateTimeFormat(
+    "en-US",
+    tz ? { timeZone: tz, weekday: "short" } : { weekday: "short" },
+  );
+  const timeOpts: Intl.DateTimeFormatOptions = {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: settings.timeFormat === "12h",
+  };
+  if (tz) timeOpts.timeZone = tz;
+  return `${dayFmt.format(when)} ${when.toLocaleTimeString("en-US", timeOpts)}`;
+}
+
+function buildListContent(
+  when: Date = new Date(),
+  opts: { compact?: boolean } = {},
+): string {
+  const compact = !!opts.compact;
+  const widest = Math.max(LOCAL_LABEL.length, ...ZONES.map((z) => z.label.length));
+  const timeColWidth = settings.timeFormat === "12h" ? 12 : 9; // "Mon HH:MM AM" vs "Mon HH:MM"
+
+  function row(label: string, tz: string, isLocal: boolean): string {
+    const dayTime = formatDayTime(isLocal ? null : tz, when).padEnd(timeColWidth);
+    const glyph = statusGlyph(tz, when);
+    if (compact) {
+      return `${label.padEnd(widest)}  ${dayTime}`;
+    }
+    const offset = isLocal ? "   " : formatOffsetVsLocal(tz, when).padStart(3);
+    return `${label.padEnd(widest)}  ${dayTime}  ${offset}  ${glyph}`;
+  }
+
+  return [
+    row(LOCAL_LABEL, LOCAL_TZ, true),
+    ...ZONES.map((z) => row(z.label, z.tz, false)),
+  ].join("\n");
 }
 
 function renderPhone(): void {
@@ -285,7 +394,7 @@ function buildMapView() {
     height: 200,
     containerID: 1,
     containerName: "list",
-    content: buildListContent(),
+    content: buildListContent(new Date(), { compact: true }),
     isEventCapture: 1,
   });
   const map = new ImageContainerProperty({
@@ -320,14 +429,14 @@ async function applyPage(
   throw new Error(`create=${createResult}, rebuild=false`);
 }
 
-async function pushListContainer(bridge: Bridge): Promise<void> {
+async function pushListContainer(bridge: Bridge, opts: { compact?: boolean } = {}): Promise<void> {
   await bridge.textContainerUpgrade(
     new TextContainerUpgrade({
       containerID: 1,
       containerName: "list",
       contentOffset: 0,
       contentLength: 0,
-      content: buildListContent(),
+      content: buildListContent(new Date(), opts),
     }),
   );
 }
@@ -397,7 +506,21 @@ async function waitForBridgeWithTimeout(ms = 1500): Promise<Bridge | null> {
   ]);
 }
 
+let currentBridge: Bridge | null = null;
+let currentViewIndex = 0;
+
+async function refreshCurrentView(): Promise<void> {
+  const bridge = currentBridge;
+  if (!bridge) return;
+  const view = VIEWS[currentViewIndex];
+  if (view === "positions") await pushPositionContainers(bridge);
+  else await pushListContainer(bridge, view === "map" ? { compact: true } : {});
+}
+
 async function start(): Promise<void> {
+  settings = loadSettingsSync();
+  wireSettingsUi();
+
   renderPhone();
   setInterval(renderPhone, 1000);
 
@@ -421,13 +544,17 @@ async function start(): Promise<void> {
     return;
   }
   const bridge: Bridge = maybeBridge;
+  currentBridge = bridge;
 
-  let viewIndex = 0;
+  // Pick up the user's last-used view if persisted.
+  const lastView = loadLastViewSync();
+  const startIdx = lastView ? Math.max(0, VIEWS.indexOf(lastView)) : 0;
+  currentViewIndex = startIdx;
   let busy = false;
 
   async function showView(idx: number): Promise<void> {
     const wrapped = ((idx % VIEWS.length) + VIEWS.length) % VIEWS.length;
-    viewIndex = wrapped;
+    currentViewIndex = wrapped;
     const view = VIEWS[wrapped];
     statusEl.textContent = `Bridge ready. View: ${view}.`;
     await applyPage(bridge, buildView(view));
@@ -441,10 +568,11 @@ async function start(): Promise<void> {
         statusEl.textContent = `Bridge ready. Map upload failed: ${err}`;
       }
     }
+    void saveLastView(view, bridge);
   }
 
   try {
-    await showView(0);
+    await showView(currentViewIndex);
   } catch (err) {
     statusEl.textContent = `HUD setup failed: ${err}`;
     return;
@@ -453,9 +581,7 @@ async function start(): Promise<void> {
   // Time refresh tick — updates whichever containers the current view has.
   scheduleNextUpdate(async () => {
     try {
-      const view = VIEWS[viewIndex];
-      if (view === "positions") await pushPositionContainers(bridge);
-      else await pushListContainer(bridge);
+      await refreshCurrentView();
     } catch {
       /* ignore — next tick retries */
     }
@@ -474,7 +600,7 @@ async function start(): Promise<void> {
       // swipe down → next view
       busy = true;
       try {
-        await showView(viewIndex + 1);
+        await showView(currentViewIndex + 1);
       } catch (err) {
         statusEl.textContent = `View switch failed: ${err}`;
       } finally {
@@ -486,7 +612,7 @@ async function start(): Promise<void> {
       // swipe up → previous view
       busy = true;
       try {
-        await showView(viewIndex - 1);
+        await showView(currentViewIndex - 1);
       } catch (err) {
         statusEl.textContent = `View switch failed: ${err}`;
       } finally {
@@ -495,6 +621,32 @@ async function start(): Promise<void> {
       return;
     }
   });
+}
+
+// ---- Phone-page settings UI ----
+
+function wireSettingsUi(): void {
+  const radios = document.querySelectorAll<HTMLInputElement>(
+    'input[name="timeFormat"]',
+  );
+  if (radios.length === 0) return;
+  for (const r of radios) {
+    r.checked = r.value === settings.timeFormat;
+    r.addEventListener("change", async () => {
+      if (!r.checked) return;
+      const v = r.value;
+      if (v !== "24h" && v !== "12h") return;
+      settings = { ...settings, timeFormat: v };
+      renderPhone();
+      await saveSettings(settings, currentBridge);
+      // If the bridge is up, push the new format to whichever view is showing.
+      try {
+        await refreshCurrentView();
+      } catch {
+        /* ignore — minute tick will retry */
+      }
+    });
+  }
 }
 
 start().catch((err) => {

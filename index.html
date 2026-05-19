@@ -71,6 +71,28 @@
         color: #1f2937;
         min-height: 2.5em;
       }
+      .settings .option {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        padding: 0.25rem 0;
+        font-size: 0.9375rem;
+        color: #111111;
+        cursor: pointer;
+      }
+      .settings .option input { accent-color: #111111; }
+      .legend {
+        font-size: 0.8125rem;
+        color: #374151;
+        line-height: 1.45;
+        margin: 0.5rem 0 0;
+      }
+      .legend code {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        background: #e5e7eb;
+        padding: 0 0.25rem;
+        border-radius: 3px;
+      }
     </style>
   </head>
   <body>
@@ -79,11 +101,33 @@
       <span class="version" id="version"></span>
     </header>
     <p class="status" id="status">Initialising…</p>
-    <p class="hint">Time across six US zones, updated every minute. Swipe on the glasses to switch views. Double-tap to exit.</p>
+    <p class="hint">Your local time plus every US zone, updated every minute. Swipe on the glasses to switch views. Double-tap to exit.</p>
     <div class="lens-preview">
       <pre id="clocks"></pre>
       <canvas id="map" width="800" height="400" aria-label="US map preview"></canvas>
     </div>
+
+    <section class="info">
+      <h2>Legend</h2>
+      <p class="legend">
+        <code>+3h</code> hours ahead of your Local time •
+        <code>*</code> business hours (9–17) •
+        <code>.</code> early / evening •
+        <code>z</code> sleeping (22–7)
+      </p>
+    </section>
+
+    <section class="info settings">
+      <h2>Settings</h2>
+      <label class="option">
+        <input type="radio" name="timeFormat" value="24h" checked />
+        <span>24-hour (14:35)</span>
+      </label>
+      <label class="option">
+        <input type="radio" name="timeFormat" value="12h" />
+        <span>12-hour (2:35 PM)</span>
+      </label>
+    </section>
 
     <section class="info">
       <h2>Daylight Saving</h2>
