@@ -35,6 +35,18 @@ const ZONES: Zone[] = [
   { label: "Hawaii",   abbr: "HST", tz: "Pacific/Honolulu",     posX: 210, posY: 235 },
 ];
 
+// World view companion to ZONES: six cities that span the rest of the globe
+// westward from US Local, US-anchored. posX/posY are unused (no positions
+// view for the world set).
+const WORLD_ZONES: Zone[] = [
+  { label: "London",   abbr: "LON", tz: "Europe/London",     posX: 0, posY: 0 },
+  { label: "Berlin",   abbr: "BER", tz: "Europe/Berlin",     posX: 0, posY: 0 },
+  { label: "Dubai",    abbr: "DXB", tz: "Asia/Dubai",        posX: 0, posY: 0 },
+  { label: "Tokyo",    abbr: "TYO", tz: "Asia/Tokyo",        posX: 0, posY: 0 },
+  { label: "Sydney",   abbr: "SYD", tz: "Australia/Sydney",  posX: 0, posY: 0 },
+  { label: "Auckland", abbr: "AKL", tz: "Pacific/Auckland",  posX: 0, posY: 0 },
+];
+
 const MAP_W = 200;
 const MAP_H = 100;
 const MAP_CONTAINER_ID = 100;
@@ -132,6 +144,7 @@ interface Settings {
 const DEFAULT_SETTINGS: Settings = { timeFormat: "24h" };
 const SETTINGS_KEY = "us-clocks-settings-v1";
 const VIEW_PREF_KEY = "us-clocks-last-view-v1";
+const TUTORIAL_KEY = "us-clocks-tutorial-seen-v1";
 
 let settings: Settings = { ...DEFAULT_SETTINGS };
 
@@ -167,6 +180,28 @@ async function saveLastView(view: ViewKind, bridge: Bridge | null): Promise<void
   try { localStorage.setItem(VIEW_PREF_KEY, view); } catch { /* swallow */ }
   if (bridge) {
     try { await bridge.setLocalStorage(VIEW_PREF_KEY, view); } catch { /* swallow */ }
+  }
+}
+
+function loadTutorialSeenSync(): boolean {
+  try {
+    return localStorage.getItem(TUTORIAL_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+async function saveTutorialSeen(bridge: Bridge | null): Promise<void> {
+  try { localStorage.setItem(TUTORIAL_KEY, "1"); } catch { /* swallow */ }
+  if (bridge) {
+    try { await bridge.setLocalStorage(TUTORIAL_KEY, "1"); } catch { /* swallow */ }
+  }
+}
+
+function clearTutorialSeen(bridge: Bridge | null): void {
+  try { localStorage.removeItem(TUTORIAL_KEY); } catch { /* swallow */ }
+  if (bridge) {
+    try { void bridge.setLocalStorage(TUTORIAL_KEY, ""); } catch { /* swallow */ }
   }
 }
 
@@ -337,10 +372,45 @@ function drawUsMap(ctx: CanvasRenderingContext2D, w: number, h: number): void {
   ctx.shadowBlur = 0;
 }
 
-// ---- Three views ----
+// ---- DST countdown banner (lens) ----
 
-type ViewKind = "column" | "positions" | "map";
-const VIEWS: ViewKind[] = ["column", "positions", "map"];
+const DST_BANNER_ID = 50;
+const DST_BANNER_NAME = "dst-banner";
+const DST_BANNER_WINDOW_DAYS = 14;
+
+// Returns the lens banner text when the next DST transition is within the
+// notification window, otherwise an empty string (banner shows nothing).
+function nextDstBannerText(now: Date): string {
+  const next = nextDstTransition(now);
+  const dayMs = 86_400_000;
+  const daysUntil = Math.ceil((next.date.getTime() - now.getTime()) / dayMs);
+  if (daysUntil <= 0 || daysUntil > DST_BANNER_WINDOW_DAYS) return "";
+  const dateStr = next.date.toLocaleDateString("en-US", {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+  });
+  const days = `${daysUntil} day${daysUntil === 1 ? "" : "s"}`;
+  return `DST ${next.type} in ${days} (${dateStr})`;
+}
+
+function dstBannerContainer(): TextContainerProperty {
+  return new TextContainerProperty({
+    xPosition: 80,
+    yPosition: 4,
+    width: 416,
+    height: 22,
+    containerID: DST_BANNER_ID,
+    containerName: DST_BANNER_NAME,
+    content: nextDstBannerText(new Date()),
+    isEventCapture: 0,
+  });
+}
+
+// ---- Views ----
+
+type ViewKind = "column" | "positions" | "map" | "world";
+const VIEWS: ViewKind[] = ["column", "positions", "map", "world"];
 
 // The G2 LVGL font is NOT monospaced — padding strings with spaces can't
 // align columns on the lens. We split the column view into four side-by-side
@@ -369,17 +439,17 @@ function colLayoutFor(fmt: TimeFormat) {
   };
 }
 
-function buildColumnViewParts(when: Date = new Date()): {
+function buildColumnViewParts(zones: Zone[], when: Date = new Date()): {
   labels: string;
   times: string;
   offsets: string;
   glyphs: string;
 } {
-  const labels = [LOCAL_LABEL, ...ZONES.map((z) => z.label)].join("\n");
+  const labels = [LOCAL_LABEL, ...zones.map((z) => z.label)].join("\n");
   const times: string[] = [formatDayTime(null, when)];
   const offsets: string[] = [""]; // Local is the reference — no offset.
   const glyphs: string[] = [statusGlyph(LOCAL_TZ, when)];
-  for (const z of ZONES) {
+  for (const z of zones) {
     times.push(formatDayTime(z.tz, when));
     offsets.push(formatOffsetVsLocal(z.tz, when));
     glyphs.push(statusGlyph(z.tz, when));
@@ -392,11 +462,12 @@ function buildColumnViewParts(when: Date = new Date()): {
   };
 }
 
-function buildColumnView() {
-  const parts = buildColumnViewParts();
+function buildColumnView(zones: Zone[]) {
+  const parts = buildColumnViewParts(zones);
   const layout = colLayoutFor(settings.timeFormat);
   const { yPosition, height } = layout;
   const containers = [
+    dstBannerContainer(),
     new TextContainerProperty({
       ...layout.labels,
       yPosition,
@@ -444,7 +515,7 @@ function positionContent(z: Zone, when: Date = new Date()): string {
 function buildPositionsView() {
   // One text container per zone, placed at its approximate geographic
   // position on the 576×288 canvas. First container captures events.
-  const textObject = ZONES.map(
+  const positions = ZONES.map(
     (z, i) =>
       new TextContainerProperty({
         xPosition: z.posX,
@@ -457,7 +528,8 @@ function buildPositionsView() {
         isEventCapture: i === 0 ? 1 : 0,
       }),
   );
-  return { containerTotalNum: ZONES.length, textObject };
+  const textObject = [dstBannerContainer(), ...positions];
+  return { containerTotalNum: textObject.length, textObject };
 }
 
 function buildMapView() {
@@ -484,13 +556,71 @@ function buildMapView() {
     containerID: MAP_CONTAINER_ID,
     containerName: MAP_CONTAINER_NAME,
   });
-  return { containerTotalNum: 2, textObject: [list], imageObject: [map] };
+  const textObject = [dstBannerContainer(), list];
+  return {
+    containerTotalNum: textObject.length + 1, // +1 for the image
+    textObject,
+    imageObject: [map],
+  };
 }
 
 function buildView(view: ViewKind) {
-  if (view === "column") return buildColumnView();
+  if (view === "column") return buildColumnView(ZONES);
+  if (view === "world") return buildColumnView(WORLD_ZONES);
   if (view === "positions") return buildPositionsView();
   return buildMapView();
+}
+
+// ---- First-launch tutorial ----
+
+function buildTutorialView() {
+  const text = [
+    "US Clocks",
+    "",
+    "Touch the temple:",
+    "Swipe down  next view",
+    "Swipe up    previous view",
+    "Double-tap  exit",
+    "",
+    "Tap or swipe to begin.",
+  ].join("\n");
+  const c = new TextContainerProperty({
+    xPosition: 60,
+    yPosition: 30,
+    width: 456,
+    height: 232,
+    containerID: 1,
+    containerName: "tutorial",
+    content: text,
+    isEventCapture: 1,
+  });
+  return { containerTotalNum: 1, textObject: [c] };
+}
+
+// Show the tutorial page and resolve on the first user gesture.
+async function runTutorial(bridge: Bridge): Promise<void> {
+  await applyPage(bridge, buildTutorialView());
+  await new Promise<void>((resolve) => {
+    let unsub: (() => void) | undefined;
+    const dismiss = () => {
+      try { unsub?.(); } catch { /* swallow */ }
+      resolve();
+    };
+    unsub = bridge.onEvenHubEvent((event) => {
+      const e = event.textEvent ?? event.sysEvent;
+      if (!e) return;
+      const type = e.eventType;
+      if (
+        type === OsEventTypeList.CLICK_EVENT ||
+        type === undefined || // CLICK_EVENT === 0 sometimes normalised to undefined
+        type === OsEventTypeList.SCROLL_TOP_EVENT ||
+        type === OsEventTypeList.SCROLL_BOTTOM_EVENT ||
+        type === OsEventTypeList.DOUBLE_CLICK_EVENT
+      ) {
+        dismiss();
+      }
+    });
+  });
 }
 
 // ---- Bridge plumbing ----
@@ -520,8 +650,20 @@ async function pushListContainer(bridge: Bridge, opts: { compact?: boolean } = {
   );
 }
 
-async function pushColumnContainers(bridge: Bridge): Promise<void> {
-  const parts = buildColumnViewParts();
+async function pushDstBanner(bridge: Bridge): Promise<void> {
+  await bridge.textContainerUpgrade(
+    new TextContainerUpgrade({
+      containerID: DST_BANNER_ID,
+      containerName: DST_BANNER_NAME,
+      contentOffset: 0,
+      contentLength: 0,
+      content: nextDstBannerText(new Date()),
+    }),
+  );
+}
+
+async function pushColumnContainers(bridge: Bridge, zones: Zone[]): Promise<void> {
+  const parts = buildColumnViewParts(zones);
   // SDK warns against concurrent sends — serialise.
   const updates: Array<[number, string, string]> = [
     [1, "labels",  parts.labels],
@@ -615,8 +757,10 @@ async function refreshCurrentView(): Promise<void> {
   if (!bridge) return;
   const view = VIEWS[currentViewIndex];
   if (view === "positions") await pushPositionContainers(bridge);
-  else if (view === "column") await pushColumnContainers(bridge);
+  else if (view === "column") await pushColumnContainers(bridge, ZONES);
+  else if (view === "world") await pushColumnContainers(bridge, WORLD_ZONES);
   else await pushListContainer(bridge, { compact: true }); // map view
+  await pushDstBanner(bridge);
 }
 
 async function start(): Promise<void> {
@@ -647,6 +791,19 @@ async function start(): Promise<void> {
   }
   const bridge: Bridge = maybeBridge;
   currentBridge = bridge;
+
+  // First-launch tutorial: show only until the user dismisses with any
+  // gesture, then never again (unless the phone-side "Show tutorial again"
+  // button clears the flag).
+  if (!loadTutorialSeenSync()) {
+    try {
+      await runTutorial(bridge);
+      await saveTutorialSeen(bridge);
+    } catch {
+      // If the tutorial path errors, don't strand the user — fall through.
+      await saveTutorialSeen(bridge);
+    }
+  }
 
   // Pick up the user's last-used view if persisted.
   const lastView = loadLastViewSync();
@@ -728,6 +885,16 @@ async function start(): Promise<void> {
 // ---- Phone-page settings UI ----
 
 function wireSettingsUi(): void {
+  const resetLink = document.getElementById("reset-tutorial");
+  if (resetLink) {
+    resetLink.addEventListener("click", (e) => {
+      e.preventDefault();
+      clearTutorialSeen(currentBridge);
+      resetLink.textContent = "Cleared — the tutorial will show on next launch.";
+      (resetLink as HTMLAnchorElement).style.pointerEvents = "none";
+    });
+  }
+
   const radios = document.querySelectorAll<HTMLInputElement>(
     'input[name="timeFormat"]',
   );
@@ -745,8 +912,10 @@ function wireSettingsUi(): void {
       // requires a page rebuild. Other views just need a content refresh.
       try {
         const bridge = currentBridge;
-        if (bridge && VIEWS[currentViewIndex] === "column") {
-          await applyPage(bridge, buildView("column"));
+        const cv = VIEWS[currentViewIndex];
+        if (bridge && (cv === "column" || cv === "world")) {
+          // Column/world layout shifts with format — rebuild the page.
+          await applyPage(bridge, buildView(cv));
         } else {
           await refreshCurrentView();
         }

@@ -101,7 +101,7 @@
       <span class="version" id="version"></span>
     </header>
     <p class="status" id="status">Initialising…</p>
-    <p class="hint">Your local time plus every US zone, updated every minute. Swipe on the glasses to switch views. Double-tap to exit.</p>
+    <p class="hint">Your local time plus every US zone (and, in the World view, six anchor cities across the globe). Updated every minute. Swipe on the glasses to switch views. Double-tap to exit.</p>
     <div class="lens-preview">
       <pre id="clocks"></pre>
       <canvas id="map" width="800" height="400" aria-label="US map preview"></canvas>
@@ -127,6 +127,9 @@
         <input type="radio" name="timeFormat" value="12h" />
         <span>12-hour (2:35 PM)</span>
       </label>
+      <p class="legend" style="margin-top: 0.75rem;">
+        <a href="#" id="reset-tutorial" style="color: #1f2937; text-decoration: underline;">Show the on-glasses tutorial again next time</a>
+      </p>
     </section>
 
     <section class="info">
