@@ -11,10 +11,12 @@ import {
   OsEventTypeList,
 } from "@evenrealities/even_hub_sdk";
 import {
-  US_OUTLINE_POLYLINES,
+  US_CONTIGUOUS_OUTLINE_POLYLINES,
+  US_ALASKA_OUTLINE_POLYLINES,
   US_INTRA_ZONE_BORDER_POLYLINES,
   US_TZ_BORDER_POLYLINES,
-  US_OUTLINE_BOUNDS,
+  US_CONTIGUOUS_BOUNDS,
+  US_ALASKA_BOUNDS,
 } from "./us-outline";
 
 type Bridge = NonNullable<Awaited<ReturnType<typeof waitForEvenAppBridge>>>;
@@ -288,13 +290,17 @@ function sunriseSunset(
   };
 }
 
-// Lens map image dimensions. h=144 is the SDK's image height cap; w chosen
-// to match the source's natural Albers-USA aspect (≈1.71) so the map fills
-// its container with no internal letterboxing.
-const MAP_W = 246;
-const MAP_H = 144;
-const MAP_CONTAINER_ID = 100;
-const MAP_CONTAINER_NAME = "map";
+// Lens map image dimensions. Contiguous 48 fills its 288×144 container
+// (the SDK's max width × max height); Alaska is rendered as a small inset
+// underneath.
+const CONTIG_MAP_W = 288;
+const CONTIG_MAP_H = 144;
+const CONTIG_MAP_ID = 100;
+const CONTIG_MAP_NAME = "map";
+const ALASKA_MAP_W = 100;
+const ALASKA_MAP_H = 60;
+const ALASKA_MAP_ID = 101;
+const ALASKA_MAP_NAME = "alaska";
 
 const statusEl = document.getElementById("status") as HTMLParagraphElement;
 const clocksEl = document.getElementById("clocks") as HTMLPreElement;
@@ -623,11 +629,12 @@ function renderPhone(): void {
   clocksEl.textContent = buildListContent();
 }
 
-// ---- Map drawing (US outline + state borders from us-atlas, AK + 48, no HI) ----
+// ---- Map drawing (contiguous 48 + Alaska inset) ----
 
 const MAP_STROKE = "#22ff66";
 
 type Polylines = ReadonlyArray<ReadonlyArray<readonly [number, number]>>;
+type Bounds = { readonly minX: number; readonly maxX: number; readonly minY: number; readonly maxY: number };
 
 function strokePolylines(
   ctx: CanvasRenderingContext2D,
@@ -650,36 +657,45 @@ function strokePolylines(
   }
 }
 
-function drawUsMap(ctx: CanvasRenderingContext2D, w: number, h: number): void {
+function computeFit(w: number, h: number, bounds: Bounds) {
+  const srcW = bounds.maxX - bounds.minX;
+  const srcH = bounds.maxY - bounds.minY;
+  const scale = Math.min(w / srcW, h / srcH);
+  const ox = (w - srcW * scale) / 2 - bounds.minX * scale;
+  const oy = (h - srcH * scale) / 2 - bounds.minY * scale;
+  return { scale, ox, oy };
+}
+
+// Contiguous 48 with all three layers: sparse intra-zone dots, solid TZ
+// borders, solid outer outline. Designed to fill its container width.
+function drawContiguousMap(ctx: CanvasRenderingContext2D, w: number, h: number): void {
   ctx.fillStyle = "black";
   ctx.fillRect(0, 0, w, h);
 
-  const { minX, maxX, minY, maxY } = US_OUTLINE_BOUNDS;
-  const srcW = maxX - minX;
-  const srcH = maxY - minY;
-  const scale = Math.min(w / srcW, h / srcH);
-  const ox = (w - srcW * scale) / 2 - minX * scale;
-  const oy = (h - srcH * scale) / 2 - minY * scale;
+  // Clip drawing to the requested region so any off-bounds polylines (e.g.
+  // Florida Keys outside the trimmed contiguous bounds) don't bleed.
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(0, 0, w, h);
+  ctx.clip();
+
+  const { scale, ox, oy } = computeFit(w, h, US_CONTIGUOUS_BOUNDS);
 
   ctx.lineJoin = "round";
   ctx.lineCap = "round";
   ctx.strokeStyle = MAP_STROKE;
   ctx.shadowColor = MAP_STROKE;
 
-  // Layer 1: intra-zone state borders — sparse dots, thin, minimal glow.
-  // The dot pattern is shorter dashes with longer gaps so individual states
-  // are SUGGESTED, not fully outlined.
+  // Layer 1: intra-zone state borders — sparse dots.
   ctx.save();
   ctx.lineWidth = Math.max(0.5, w / 800);
   ctx.shadowBlur = Math.max(0.5, w / 400);
   const dotLen = Math.max(1, w / 400);
-  ctx.setLineDash([dotLen, dotLen * 4]); // 4x gap : dash → sparse
+  ctx.setLineDash([dotLen, dotLen * 4]);
   strokePolylines(ctx, US_INTRA_ZONE_BORDER_POLYLINES, ox, oy, scale);
   ctx.restore();
 
-  // Layer 2: time-zone borders — solid, slightly thinner than the outer
-  // outline, moderate glow. Follows the actual state borders that divide
-  // zones, so visually accurate (no straight-line approximations).
+  // Layer 2: time-zone borders — solid, follows real state lines.
   ctx.save();
   ctx.lineWidth = Math.max(1, w / 500);
   ctx.shadowBlur = Math.max(1.5, w / 200);
@@ -687,16 +703,61 @@ function drawUsMap(ctx: CanvasRenderingContext2D, w: number, h: number): void {
   strokePolylines(ctx, US_TZ_BORDER_POLYLINES, ox, oy, scale);
   ctx.restore();
 
-  // Layer 3: outer outline on top — same line weight + glow as TZ borders
-  // so it doesn't dominate; visual distinction is location, not thickness.
+  // Layer 3: outer outline — same weight as TZ borders.
   ctx.save();
   ctx.lineWidth = Math.max(1, w / 500);
   ctx.shadowBlur = Math.max(1.5, w / 200);
   ctx.setLineDash([]);
-  strokePolylines(ctx, US_OUTLINE_POLYLINES, ox, oy, scale);
+  strokePolylines(ctx, US_CONTIGUOUS_OUTLINE_POLYLINES, ox, oy, scale);
   ctx.restore();
 
+  ctx.restore();
   ctx.shadowBlur = 0;
+}
+
+// Alaska inset — outline only (no interior state borders).
+function drawAlaskaInset(ctx: CanvasRenderingContext2D, w: number, h: number): void {
+  ctx.fillStyle = "black";
+  ctx.fillRect(0, 0, w, h);
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(0, 0, w, h);
+  ctx.clip();
+
+  const { scale, ox, oy } = computeFit(w, h, US_ALASKA_BOUNDS);
+
+  ctx.lineJoin = "round";
+  ctx.lineCap = "round";
+  ctx.strokeStyle = MAP_STROKE;
+  ctx.shadowColor = MAP_STROKE;
+  ctx.lineWidth = Math.max(1, w / 200);
+  ctx.shadowBlur = Math.max(1, w / 100);
+  ctx.setLineDash([]);
+  strokePolylines(ctx, US_ALASKA_OUTLINE_POLYLINES, ox, oy, scale);
+
+  ctx.restore();
+  ctx.shadowBlur = 0;
+}
+
+// Phone preview — single canvas showing both contiguous and Alaska in a
+// layout that mirrors the lens: contiguous fills the top ~70 %, Alaska sits
+// in the bottom-left as a small inset.
+function drawPhoneMapPreview(ctx: CanvasRenderingContext2D, w: number, h: number): void {
+  ctx.fillStyle = "black";
+  ctx.fillRect(0, 0, w, h);
+  const contigH = Math.floor(h * 0.70);
+  const akW = Math.floor(w * 0.30);
+  const akH = h - contigH;
+
+  // Contiguous map on top.
+  drawContiguousMap(ctx, w, contigH);
+
+  // Alaska inset in bottom-left.
+  ctx.save();
+  ctx.translate(0, contigH);
+  drawAlaskaInset(ctx, akW, akH);
+  ctx.restore();
 }
 
 // ---- Top banner (date + optional DST countdown) ----
@@ -922,11 +983,11 @@ function buildPositionsView() {
 }
 
 function buildMapView() {
-  // List on the left, map on the right. List takes the left ~half; the map
-  // is centered in the right ~half. Both span the same vertical band so they
-  // read as a single composition.
-  // List:  x=20..280 (w=260), y=44..244 (h=200) — center y=144.
-  // Map:   x=305..551 (w=246), y=72..216 (h=144) — center y=144.
+  // List on the left, two map images on the right: a big contiguous-48 image
+  // on top and a small Alaska inset below it.
+  // List:        x=20..280 (w=260), y=44..244 (h=200) — center y=144.
+  // Contiguous:  x=288..576 (w=288), y=72..216 (h=144) — center y=144.
+  // Alaska:      x=292..392 (w=100), y=222..282 (h=60) — below contiguous.
   const list = new TextContainerProperty({
     xPosition: 20,
     yPosition: 44,
@@ -937,19 +998,28 @@ function buildMapView() {
     content: buildListContent(new Date(), { compact: true }),
     isEventCapture: 1,
   });
-  const map = new ImageContainerProperty({
-    xPosition: 305,
+  const contigMap = new ImageContainerProperty({
+    xPosition: 288,
     yPosition: 72,
-    width: MAP_W,
-    height: MAP_H,
-    containerID: MAP_CONTAINER_ID,
-    containerName: MAP_CONTAINER_NAME,
+    width: CONTIG_MAP_W,
+    height: CONTIG_MAP_H,
+    containerID: CONTIG_MAP_ID,
+    containerName: CONTIG_MAP_NAME,
+  });
+  const alaskaMap = new ImageContainerProperty({
+    xPosition: 292,
+    yPosition: 222,
+    width: ALASKA_MAP_W,
+    height: ALASKA_MAP_H,
+    containerID: ALASKA_MAP_ID,
+    containerName: ALASKA_MAP_NAME,
   });
   const textObject = [topBannerContainer(), list];
+  const imageObject = [contigMap, alaskaMap];
   return {
-    containerTotalNum: textObject.length + 1, // +1 for the image
+    containerTotalNum: textObject.length + imageObject.length,
     textObject,
-    imageObject: [map],
+    imageObject,
   };
 }
 
@@ -1096,29 +1166,53 @@ async function pushPositionContainers(bridge: Bridge): Promise<void> {
   }
 }
 
-async function sendMapImage(bridge: Bridge): Promise<ImageRawDataUpdateResult> {
-  const canvas = document.createElement("canvas");
-  canvas.width = MAP_W;
-  canvas.height = MAP_H;
-  const ctx = canvas.getContext("2d");
-  if (!ctx) throw new Error("no 2d context");
-  drawUsMap(ctx, MAP_W, MAP_H);
-
-  if (mapEl) {
-    const pctx = mapEl.getContext("2d");
-    if (pctx) drawUsMap(pctx, mapEl.width, mapEl.height);
-  }
-
+async function canvasToBytes(canvas: HTMLCanvasElement): Promise<number[]> {
   const blob = await new Promise<Blob | null>((resolve) =>
     canvas.toBlob((b) => resolve(b), "image/png"),
   );
   if (!blob) throw new Error("toBlob returned null");
-  const bytes = Array.from(new Uint8Array(await blob.arrayBuffer()));
+  return Array.from(new Uint8Array(await blob.arrayBuffer()));
+}
+
+async function sendMapImages(bridge: Bridge): Promise<ImageRawDataUpdateResult> {
+  // Two images sent SERIALLY — the SDK warns against concurrent
+  // updateImageRawData calls.
+  const contig = document.createElement("canvas");
+  contig.width = CONTIG_MAP_W;
+  contig.height = CONTIG_MAP_H;
+  const cctx = contig.getContext("2d");
+  if (!cctx) throw new Error("no 2d context");
+  drawContiguousMap(cctx, CONTIG_MAP_W, CONTIG_MAP_H);
+
+  const alaska = document.createElement("canvas");
+  alaska.width = ALASKA_MAP_W;
+  alaska.height = ALASKA_MAP_H;
+  const actx = alaska.getContext("2d");
+  if (!actx) throw new Error("no 2d context");
+  drawAlaskaInset(actx, ALASKA_MAP_W, ALASKA_MAP_H);
+
+  // Repaint the phone preview to match.
+  if (mapEl) {
+    const pctx = mapEl.getContext("2d");
+    if (pctx) drawPhoneMapPreview(pctx, mapEl.width, mapEl.height);
+  }
+
+  const contigBytes = await canvasToBytes(contig);
+  const contigResult = await bridge.updateImageRawData(
+    new ImageRawDataUpdate({
+      containerID: CONTIG_MAP_ID,
+      containerName: CONTIG_MAP_NAME,
+      imageData: contigBytes,
+    }),
+  );
+  if (contigResult !== ImageRawDataUpdateResult.success) return contigResult;
+
+  const alaskaBytes = await canvasToBytes(alaska);
   return await bridge.updateImageRawData(
     new ImageRawDataUpdate({
-      containerID: MAP_CONTAINER_ID,
-      containerName: MAP_CONTAINER_NAME,
-      imageData: bytes,
+      containerID: ALASKA_MAP_ID,
+      containerName: ALASKA_MAP_NAME,
+      imageData: alaskaBytes,
     }),
   );
 }
@@ -1183,7 +1277,7 @@ async function start(): Promise<void> {
 
   if (mapEl) {
     const pctx = mapEl.getContext("2d");
-    if (pctx) drawUsMap(pctx, mapEl.width, mapEl.height);
+    if (pctx) drawPhoneMapPreview(pctx, mapEl.width, mapEl.height);
   }
 
   const maybeBridge = await waitForBridgeWithTimeout();
@@ -1222,7 +1316,7 @@ async function start(): Promise<void> {
     await applyPage(bridge, buildView(view));
     if (view === "map") {
       try {
-        const r = await sendMapImage(bridge);
+        const r = await sendMapImages(bridge);
         if (r !== ImageRawDataUpdateResult.success) {
           statusEl.textContent = `Bridge ready. Map: ${r}.`;
         }
