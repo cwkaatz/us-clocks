@@ -19,5 +19,5 @@ export const US_TZ_BORDER_POLYLINES: ReadonlyArray<ReadonlyArray<readonly [numbe
 // Bounding boxes used by the renderer to fit-and-centre each region.
 // Contiguous bounds exclude tiny Florida-Keys outliers so the mainland fills
 // the container (Keys still render where they fall — off-canvas, harmless).
-export const US_CONTIGUOUS_BOUNDS = { minX: 18, maxX: 957, minY: 13, maxY: 485 } as const;
+export const US_CONTIGUOUS_BOUNDS = { minX: 18, maxX: 957, minY: 13, maxY: 607 } as const;
 export const US_ALASKA_BOUNDS = { minX: -58, maxX: 203, minY: 465, maxY: 604 } as const;

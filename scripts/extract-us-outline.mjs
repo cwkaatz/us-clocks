@@ -120,19 +120,12 @@ function boundsOf(lines) {
   return { minX, maxX, minY, maxY };
 }
 
-// The contiguous outline includes Florida-Keys segments extending to y≈607
-// in this projection. They're part of the same merged polyline as mainland
-// Florida (topojson.mesh combined adjacent arcs), so we can't drop them by
-// filtering polylines. Instead we just clamp the bounds' maxY to mainland
-// Florida's southernmost reach — Keys still render but their pixels fall
-// below the canvas (harmlessly clipped), and the rest of the US fills the
-// container properly.
-const CONTIG_MAX_Y_CAP = 485;
-const rawContigBounds = boundsOf(contiguousPolylines);
-const contiguousBounds = {
-  ...rawContigBounds,
-  maxY: Math.min(rawContigBounds.maxY, CONTIG_MAX_Y_CAP),
-};
+// Use the natural contiguous bounds so all of mainland Florida (y≈593) and
+// South Texas (y≈597) stay visible. The Florida Keys at y≈607 are tiny
+// enough that they're barely a pixel at lens resolution. The trade-off:
+// contiguous height (594) makes the map height-bound in the 288×144
+// container, so it renders at ~227 px wide instead of filling 288.
+const contiguousBounds = boundsOf(contiguousPolylines);
 const alaskaBounds = boundsOf(alaskaPolylines);
 
 const sumPoints = (lines) => lines.reduce((acc, line) => acc + line.length, 0);

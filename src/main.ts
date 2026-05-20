@@ -297,8 +297,10 @@ const CONTIG_MAP_W = 288;
 const CONTIG_MAP_H = 144;
 const CONTIG_MAP_ID = 100;
 const CONTIG_MAP_NAME = "map";
-const ALASKA_MAP_W = 100;
-const ALASKA_MAP_H = 60;
+// Alaska natural Albers-USA aspect ≈ 1.88 (261×139 source). 120×64 ≈ 1.875,
+// so the inset fills its container with essentially no letterboxing.
+const ALASKA_MAP_W = 120;
+const ALASKA_MAP_H = 64;
 const ALASKA_MAP_ID = 101;
 const ALASKA_MAP_NAME = "alaska";
 
@@ -984,10 +986,14 @@ function buildPositionsView() {
 
 function buildMapView() {
   // List on the left, two map images on the right: a big contiguous-48 image
-  // on top and a small Alaska inset below it.
+  // on top and an Alaska inset below it.
   // List:        x=20..280 (w=260), y=44..244 (h=200) — center y=144.
   // Contiguous:  x=288..576 (w=288), y=72..216 (h=144) — center y=144.
-  // Alaska:      x=292..392 (w=100), y=222..282 (h=60) — below contiguous.
+  //              All states (incl. Florida + South Texas + Keys) visible;
+  //              source aspect 1.58 height-binds the scale, so the map
+  //              renders ~227 px wide inside the 288-wide container
+  //              (letterboxed black on each side — acceptable trade-off).
+  // Alaska:      x=292..412 (w=120), y=222..286 (h=64) — below contiguous.
   const list = new TextContainerProperty({
     xPosition: 20,
     yPosition: 44,
