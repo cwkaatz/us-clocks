@@ -93,6 +93,106 @@
         padding: 0 0.25rem;
         border-radius: 3px;
       }
+      .picks {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.375rem;
+        margin: 0.25rem 0 0.75rem;
+        min-height: 1.75rem;
+      }
+      .pick {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.375rem;
+        padding: 0.25rem 0.5rem 0.25rem 0.625rem;
+        font-size: 0.875rem;
+        background: #1f2937;
+        color: #ffffff;
+        border-radius: 999px;
+      }
+      .pick button {
+        background: transparent;
+        color: #ffffff;
+        border: none;
+        font-size: 1rem;
+        line-height: 1;
+        padding: 0 0.125rem;
+        cursor: pointer;
+      }
+      .picks-empty { color: #6b7280; font-size: 0.8125rem; font-style: italic; }
+      .picker-search {
+        width: 100%;
+        font-size: 0.9375rem;
+        padding: 0.5rem 0.625rem;
+        border: 1px solid #d1d5db;
+        border-radius: 6px;
+        color: #111111;
+        background: #ffffff;
+        box-sizing: border-box;
+      }
+      .picker-results {
+        list-style: none;
+        margin: 0.5rem 0 0;
+        padding: 0;
+        max-height: 18rem;
+        overflow-y: auto;
+        border: 1px solid #e5e7eb;
+        border-radius: 6px;
+        background: #ffffff;
+      }
+      .picker-results li {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 0.5rem;
+        padding: 0.4375rem 0.625rem;
+        font-size: 0.875rem;
+        border-bottom: 1px solid #f3f4f6;
+      }
+      .picker-results li:last-child { border-bottom: none; }
+      .picker-results .region-header {
+        font-size: 0.6875rem;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: #6b7280;
+        background: #f9fafb;
+        font-weight: 600;
+      }
+      .picker-results .tz-name {
+        color: #6b7280;
+        font-size: 0.75rem;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      }
+      .picker-results button {
+        font-size: 0.8125rem;
+        padding: 0.1875rem 0.625rem;
+        background: #111111;
+        color: #ffffff;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+      }
+      .picker-results button[disabled] {
+        background: #d1d5db;
+        cursor: not-allowed;
+      }
+      .picker-results .already-picked { color: #9ca3af; font-style: italic; }
+      .picker-empty {
+        padding: 0.75rem;
+        color: #6b7280;
+        font-size: 0.875rem;
+        text-align: center;
+      }
+      .picker-empty button {
+        margin-top: 0.5rem;
+        font-size: 0.8125rem;
+        padding: 0.25rem 0.625rem;
+        background: #111111;
+        color: #ffffff;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+      }
     </style>
   </head>
   <body>
@@ -129,6 +229,27 @@
       </label>
       <p class="legend" style="margin-top: 0.75rem;">
         <a href="#" id="reset-tutorial" style="color: #1f2937; text-decoration: underline;">Show the on-glasses tutorial again next time</a>
+      </p>
+    </section>
+
+    <section class="info world-picker">
+      <h2>World view cities</h2>
+      <p class="legend" style="margin-bottom: 0.5rem;">
+        Pick up to <span id="world-picks-cap">6</span> cities to show on the
+        lens in the World view. Tap a chip to remove.
+      </p>
+      <div class="picks" id="world-picks-list" aria-label="Your picks"></div>
+      <input
+        class="picker-search"
+        type="search"
+        id="world-search"
+        placeholder="Search a city, or type an IANA timezone…"
+        autocomplete="off"
+        spellcheck="false"
+      />
+      <ul class="picker-results" id="world-results"></ul>
+      <p class="legend" style="margin-top: 0.625rem;">
+        <a href="#" id="world-reset" style="color: #1f2937; text-decoration: underline;">Reset to defaults</a>
       </p>
     </section>
 

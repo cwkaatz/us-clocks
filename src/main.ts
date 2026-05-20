@@ -35,17 +35,131 @@ const ZONES: Zone[] = [
   { label: "Hawaii",   abbr: "HST", tz: "Pacific/Honolulu",     posX: 210, posY: 235 },
 ];
 
-// World view companion to ZONES: six cities that span the rest of the globe
-// westward from US Local, US-anchored. posX/posY are unused (no positions
-// view for the world set).
-const WORLD_ZONES: Zone[] = [
-  { label: "London",   abbr: "LON", tz: "Europe/London",     posX: 0, posY: 0 },
-  { label: "Berlin",   abbr: "BER", tz: "Europe/Berlin",     posX: 0, posY: 0 },
-  { label: "Dubai",    abbr: "DXB", tz: "Asia/Dubai",        posX: 0, posY: 0 },
-  { label: "Tokyo",    abbr: "TYO", tz: "Asia/Tokyo",        posX: 0, posY: 0 },
-  { label: "Sydney",   abbr: "SYD", tz: "Australia/Sydney",  posX: 0, posY: 0 },
-  { label: "Auckland", abbr: "AKL", tz: "Pacific/Auckland",  posX: 0, posY: 0 },
+// ---- World view: curated catalog + user picks ----
+
+interface CityCatalogEntry {
+  label: string;
+  tz: string;
+  region: "Americas" | "Europe" | "Middle East / Africa" | "Asia" | "Oceania";
+}
+
+const CITY_CATALOG: CityCatalogEntry[] = [
+  // Americas
+  { region: "Americas",             label: "Anchorage",    tz: "America/Anchorage" },
+  { region: "Americas",             label: "Honolulu",     tz: "Pacific/Honolulu" },
+  { region: "Americas",             label: "Los Angeles",  tz: "America/Los_Angeles" },
+  { region: "Americas",             label: "Denver",       tz: "America/Denver" },
+  { region: "Americas",             label: "Chicago",      tz: "America/Chicago" },
+  { region: "Americas",             label: "New York",     tz: "America/New_York" },
+  { region: "Americas",             label: "Toronto",      tz: "America/Toronto" },
+  { region: "Americas",             label: "Mexico City",  tz: "America/Mexico_City" },
+  { region: "Americas",             label: "Bogota",       tz: "America/Bogota" },
+  { region: "Americas",             label: "Lima",         tz: "America/Lima" },
+  { region: "Americas",             label: "Santiago",     tz: "America/Santiago" },
+  { region: "Americas",             label: "Sao Paulo",    tz: "America/Sao_Paulo" },
+  { region: "Americas",             label: "Buenos Aires", tz: "America/Argentina/Buenos_Aires" },
+  // Europe
+  { region: "Europe",               label: "Reykjavik",    tz: "Atlantic/Reykjavik" },
+  { region: "Europe",               label: "Dublin",       tz: "Europe/Dublin" },
+  { region: "Europe",               label: "London",       tz: "Europe/London" },
+  { region: "Europe",               label: "Lisbon",       tz: "Europe/Lisbon" },
+  { region: "Europe",               label: "Madrid",       tz: "Europe/Madrid" },
+  { region: "Europe",               label: "Paris",        tz: "Europe/Paris" },
+  { region: "Europe",               label: "Amsterdam",    tz: "Europe/Amsterdam" },
+  { region: "Europe",               label: "Berlin",       tz: "Europe/Berlin" },
+  { region: "Europe",               label: "Rome",         tz: "Europe/Rome" },
+  { region: "Europe",               label: "Stockholm",    tz: "Europe/Stockholm" },
+  { region: "Europe",               label: "Helsinki",     tz: "Europe/Helsinki" },
+  { region: "Europe",               label: "Warsaw",       tz: "Europe/Warsaw" },
+  { region: "Europe",               label: "Athens",       tz: "Europe/Athens" },
+  { region: "Europe",               label: "Istanbul",     tz: "Europe/Istanbul" },
+  { region: "Europe",               label: "Moscow",       tz: "Europe/Moscow" },
+  // Middle East / Africa
+  { region: "Middle East / Africa", label: "Lagos",        tz: "Africa/Lagos" },
+  { region: "Middle East / Africa", label: "Cairo",        tz: "Africa/Cairo" },
+  { region: "Middle East / Africa", label: "Cape Town",    tz: "Africa/Johannesburg" },
+  { region: "Middle East / Africa", label: "Nairobi",      tz: "Africa/Nairobi" },
+  { region: "Middle East / Africa", label: "Tel Aviv",     tz: "Asia/Jerusalem" },
+  { region: "Middle East / Africa", label: "Riyadh",       tz: "Asia/Riyadh" },
+  { region: "Middle East / Africa", label: "Tehran",       tz: "Asia/Tehran" },
+  { region: "Middle East / Africa", label: "Dubai",        tz: "Asia/Dubai" },
+  // Asia
+  { region: "Asia",                 label: "Karachi",      tz: "Asia/Karachi" },
+  { region: "Asia",                 label: "Mumbai",       tz: "Asia/Kolkata" },
+  { region: "Asia",                 label: "Kathmandu",    tz: "Asia/Kathmandu" },
+  { region: "Asia",                 label: "Dhaka",        tz: "Asia/Dhaka" },
+  { region: "Asia",                 label: "Bangkok",      tz: "Asia/Bangkok" },
+  { region: "Asia",                 label: "Jakarta",      tz: "Asia/Jakarta" },
+  { region: "Asia",                 label: "Singapore",    tz: "Asia/Singapore" },
+  { region: "Asia",                 label: "Manila",       tz: "Asia/Manila" },
+  { region: "Asia",                 label: "Hong Kong",    tz: "Asia/Hong_Kong" },
+  { region: "Asia",                 label: "Shanghai",     tz: "Asia/Shanghai" },
+  { region: "Asia",                 label: "Taipei",       tz: "Asia/Taipei" },
+  { region: "Asia",                 label: "Seoul",        tz: "Asia/Seoul" },
+  { region: "Asia",                 label: "Tokyo",        tz: "Asia/Tokyo" },
+  // Oceania
+  { region: "Oceania",              label: "Perth",        tz: "Australia/Perth" },
+  { region: "Oceania",              label: "Adelaide",     tz: "Australia/Adelaide" },
+  { region: "Oceania",              label: "Brisbane",     tz: "Australia/Brisbane" },
+  { region: "Oceania",              label: "Sydney",       tz: "Australia/Sydney" },
+  { region: "Oceania",              label: "Auckland",     tz: "Pacific/Auckland" },
+  { region: "Oceania",              label: "Fiji",         tz: "Pacific/Fiji" },
 ];
+
+interface UserCity {
+  label: string;
+  tz: string;
+}
+
+const MAX_WORLD_PICKS = 6;
+
+const DEFAULT_WORLD_PICKS: UserCity[] = [
+  { label: "London",   tz: "Europe/London" },
+  { label: "Berlin",   tz: "Europe/Berlin" },
+  { label: "Dubai",    tz: "Asia/Dubai" },
+  { label: "Tokyo",    tz: "Asia/Tokyo" },
+  { label: "Sydney",   tz: "Australia/Sydney" },
+  { label: "Auckland", tz: "Pacific/Auckland" },
+];
+
+let worldPicks: UserCity[] = [...DEFAULT_WORLD_PICKS];
+
+function isValidTimezone(tz: string): boolean {
+  if (typeof tz !== "string" || tz.length === 0) return false;
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: tz });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function isValidPick(p: unknown): p is UserCity {
+  if (!p || typeof p !== "object") return false;
+  const obj = p as UserCity;
+  return typeof obj.label === "string"
+    && obj.label.length > 0
+    && typeof obj.tz === "string"
+    && isValidTimezone(obj.tz);
+}
+
+// Convert "America/Argentina/Buenos_Aires" -> "Buenos Aires" for custom picks
+// that aren't in the catalog.
+function labelFromTz(tz: string): string {
+  const last = tz.split("/").pop() ?? tz;
+  return last.replace(/_/g, " ");
+}
+
+// Build the Zone[] the column-view builder consumes from the current picks.
+function currentWorldZones(): Zone[] {
+  return worldPicks.map((pick) => ({
+    label: pick.label,
+    abbr: pick.label.slice(0, 3).toUpperCase(),
+    tz: pick.tz,
+    posX: 0,
+    posY: 0,
+  }));
+}
 
 const MAP_W = 200;
 const MAP_H = 100;
@@ -145,6 +259,7 @@ const DEFAULT_SETTINGS: Settings = { timeFormat: "24h" };
 const SETTINGS_KEY = "us-clocks-settings-v1";
 const VIEW_PREF_KEY = "us-clocks-last-view-v1";
 const TUTORIAL_KEY = "us-clocks-tutorial-seen-v1";
+const WORLD_PICKS_KEY = "us-clocks-world-picks-v1";
 
 let settings: Settings = { ...DEFAULT_SETTINGS };
 
@@ -205,6 +320,32 @@ function clearTutorialSeen(bridge: Bridge | null): void {
   }
 }
 
+function loadWorldPicksSync(): UserCity[] {
+  try {
+    const raw = localStorage.getItem(WORLD_PICKS_KEY);
+    // Empty array IS a valid state ("user cleared all"); only the absence of
+    // the key (or invalid contents) falls back to defaults.
+    if (raw !== null) {
+      const parsed: unknown = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.every(isValidPick)) {
+        return parsed.slice(0, MAX_WORLD_PICKS);
+      }
+    }
+  } catch { /* swallow */ }
+  return [...DEFAULT_WORLD_PICKS];
+}
+
+async function saveWorldPicks(
+  picks: UserCity[],
+  bridge: Bridge | null,
+): Promise<void> {
+  const json = JSON.stringify(picks);
+  try { localStorage.setItem(WORLD_PICKS_KEY, json); } catch { /* swallow */ }
+  if (bridge) {
+    try { await bridge.setLocalStorage(WORLD_PICKS_KEY, json); } catch { /* swallow */ }
+  }
+}
+
 // ---- Time / zone helpers ----
 
 const LOCAL_LABEL = "Local";
@@ -248,10 +389,15 @@ function zoneOffsetMinutes(tz: string, when: Date): number {
 
 function formatOffsetVsLocal(tz: string, when: Date): string {
   const diff = zoneOffsetMinutes(tz, when) - zoneOffsetMinutes(LOCAL_TZ, when);
-  const hours = Math.round(diff / 60);
-  if (hours === 0) return " 0h";
-  const sign = hours > 0 ? "+" : "-";
-  return `${sign}${Math.abs(hours)}h`;
+  if (diff === 0) return " 0h";
+  const sign = diff > 0 ? "+" : "-";
+  const abs = Math.abs(diff);
+  const h = Math.floor(abs / 60);
+  const m = abs % 60;
+  if (m === 0) return `${sign}${h}h`;
+  // Half- and quarter-hour zones (India +5:30, Adelaide +9:30, Nepal +5:45,
+  // Newfoundland -3:30, etc.) — show the precise minute offset.
+  return `${sign}${h}:${m.toString().padStart(2, "0")}`;
 }
 
 // "*" = business hours (09:00–16:59), "." = awake but off (07:00–08:59,
@@ -417,22 +563,33 @@ const VIEWS: ViewKind[] = ["column", "positions", "map", "world"];
 // text containers anchored at fixed x positions, so each column starts at the
 // same pixel column regardless of how wide the rendered text is.
 //
-// The offset/glyph column positions depend on the current time format: 12h
-// strings ("Tue 09:55 PM") render visibly wider than 24h ("Tue 09:55"), so
-// in 24h mode we slide the right-side columns left to close the gap. The
-// page is rebuilt on a format flip; the minute-tick path only does content
-// upgrades, so per-format layouts cost nothing at steady state.
-function colLayoutFor(fmt: TimeFormat) {
-  const timesX = 210;
+// The right-side column positions depend on:
+//   1. the current time format (12h "Tue 09:55 PM" renders wider than 24h),
+//   2. the widest label among the displayed rows (US zones top out at
+//      "Mountain" = 8 chars; world picks can be longer — "Buenos Aires" = 12).
+//   The labels column auto-widens, and times/offsets/glyphs slide right.
+//
+// The offsets column also accommodates "+5:30" style half/quarter-hour zones,
+// 5 chars vs the typical 3 for whole-hour offsets.
+//
+// The page is rebuilt on a format flip or a picks change; the minute-tick path
+// only does content upgrades, so per-format/per-picks layouts cost nothing at
+// steady state.
+function colLayoutFor(fmt: TimeFormat, widestLabelChars: number) {
+  // ~12px per char in the LVGL font on the G2; allow 12px slack.
+  const labelsX = 90;
+  const minLabelsWidth = 110;
+  const labelsWidth = Math.max(minLabelsWidth, widestLabelChars * 12 + 12);
+  const timesX = labelsX + labelsWidth + 10;
   const timesWidth = fmt === "12h" ? 170 : 130;
   const gapBeforeOffset = 14;
   const offsetsX = timesX + timesWidth + gapBeforeOffset;
-  const offsetsWidth = 55;
+  const offsetsWidth = 65;
   const glyphsX = offsetsX + offsetsWidth + 6;
   return {
     yPosition: 30,
     height: 232,
-    labels:  { xPosition: 90,       width: 110 },
+    labels:  { xPosition: labelsX,  width: labelsWidth },
     times:   { xPosition: timesX,   width: timesWidth },
     offsets: { xPosition: offsetsX, width: offsetsWidth },
     glyphs:  { xPosition: glyphsX,  width: 40 },
@@ -464,7 +621,11 @@ function buildColumnViewParts(zones: Zone[], when: Date = new Date()): {
 
 function buildColumnView(zones: Zone[]) {
   const parts = buildColumnViewParts(zones);
-  const layout = colLayoutFor(settings.timeFormat);
+  const widest = Math.max(
+    LOCAL_LABEL.length,
+    ...zones.map((z) => z.label.length),
+  );
+  const layout = colLayoutFor(settings.timeFormat, widest);
   const { yPosition, height } = layout;
   const containers = [
     dstBannerContainer(),
@@ -566,7 +727,7 @@ function buildMapView() {
 
 function buildView(view: ViewKind) {
   if (view === "column") return buildColumnView(ZONES);
-  if (view === "world") return buildColumnView(WORLD_ZONES);
+  if (view === "world") return buildColumnView(currentWorldZones());
   if (view === "positions") return buildPositionsView();
   return buildMapView();
 }
@@ -758,14 +919,16 @@ async function refreshCurrentView(): Promise<void> {
   const view = VIEWS[currentViewIndex];
   if (view === "positions") await pushPositionContainers(bridge);
   else if (view === "column") await pushColumnContainers(bridge, ZONES);
-  else if (view === "world") await pushColumnContainers(bridge, WORLD_ZONES);
+  else if (view === "world") await pushColumnContainers(bridge, currentWorldZones());
   else await pushListContainer(bridge, { compact: true }); // map view
   await pushDstBanner(bridge);
 }
 
 async function start(): Promise<void> {
   settings = loadSettingsSync();
+  worldPicks = loadWorldPicksSync();
   wireSettingsUi();
+  wireWorldPickerUi();
 
   renderPhone();
   setInterval(renderPhone, 1000);
@@ -924,6 +1087,203 @@ function wireSettingsUi(): void {
       }
     });
   }
+}
+
+// ---- Phone-page world picker UI ----
+
+function wireWorldPickerUi(): void {
+  const picksEl = document.getElementById("world-picks-list");
+  const searchEl = document.getElementById("world-search") as HTMLInputElement | null;
+  const resultsEl = document.getElementById("world-results");
+  const capEl = document.getElementById("world-picks-cap");
+  const resetEl = document.getElementById("world-reset");
+  if (!picksEl || !searchEl || !resultsEl) return;
+  if (capEl) capEl.textContent = String(MAX_WORLD_PICKS);
+
+  let query = "";
+
+  function renderPicks(): void {
+    if (!picksEl) return;
+    if (worldPicks.length === 0) {
+      picksEl.innerHTML =
+        '<span class="picks-empty">No cities — World view will show only Local.</span>';
+      return;
+    }
+    picksEl.innerHTML = "";
+    for (const pick of worldPicks) {
+      const chip = document.createElement("span");
+      chip.className = "pick";
+      const text = document.createElement("span");
+      text.textContent = pick.label;
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.setAttribute("aria-label", `Remove ${pick.label}`);
+      btn.textContent = "×";
+      btn.addEventListener("click", () => {
+        removePick(pick.tz);
+      });
+      chip.append(text, btn);
+      picksEl.appendChild(chip);
+    }
+  }
+
+  function renderResults(): void {
+    if (!resultsEl) return;
+    resultsEl.innerHTML = "";
+    const q = query.trim().toLowerCase();
+    const isFull = worldPicks.length >= MAX_WORLD_PICKS;
+
+    // Filter the catalog. When the query looks like an IANA name ("Asia/X"),
+    // also offer it as a custom add at the top of the list if it's a valid
+    // timezone and not already picked.
+    let entries = CITY_CATALOG.filter((e) => {
+      if (!q) return true;
+      return (
+        e.label.toLowerCase().includes(q) ||
+        e.tz.toLowerCase().includes(q) ||
+        e.region.toLowerCase().includes(q)
+      );
+    });
+
+    const lookingLikeIana = q.includes("/");
+    const queryRaw = searchEl?.value?.trim() ?? "";
+    if (
+      lookingLikeIana &&
+      isValidTimezone(queryRaw) &&
+      !worldPicks.some((p) => p.tz === queryRaw) &&
+      !entries.some((e) => e.tz.toLowerCase() === q)
+    ) {
+      const li = document.createElement("li");
+      const left = document.createElement("div");
+      const labelStrong = document.createElement("strong");
+      labelStrong.textContent = labelFromTz(queryRaw);
+      const tzSpan = document.createElement("div");
+      tzSpan.className = "tz-name";
+      tzSpan.textContent = queryRaw + " (custom)";
+      left.append(labelStrong, tzSpan);
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.textContent = isFull ? "Full" : "Add";
+      btn.disabled = isFull;
+      btn.addEventListener("click", () => {
+        addPick({ label: labelFromTz(queryRaw), tz: queryRaw });
+        searchEl!.value = "";
+        query = "";
+        renderResults();
+      });
+      li.append(left, btn);
+      resultsEl.appendChild(li);
+    }
+
+    if (entries.length === 0 && !lookingLikeIana) {
+      const empty = document.createElement("div");
+      empty.className = "picker-empty";
+      empty.textContent = "No matches.";
+      resultsEl.appendChild(empty);
+      return;
+    }
+
+    // Group by region — only when there's no query, since search results read
+    // better flat.
+    if (!q) {
+      const byRegion = new Map<string, CityCatalogEntry[]>();
+      for (const e of entries) {
+        const arr = byRegion.get(e.region) ?? [];
+        arr.push(e);
+        byRegion.set(e.region, arr);
+      }
+      for (const [region, list] of byRegion) {
+        const header = document.createElement("li");
+        header.className = "region-header";
+        header.textContent = region;
+        resultsEl.appendChild(header);
+        for (const e of list) appendCatalogRow(e, isFull);
+      }
+    } else {
+      for (const e of entries) appendCatalogRow(e, isFull);
+    }
+  }
+
+  function appendCatalogRow(entry: CityCatalogEntry, isFull: boolean): void {
+    if (!resultsEl) return;
+    const alreadyPicked = worldPicks.some((p) => p.tz === entry.tz);
+    const li = document.createElement("li");
+    const left = document.createElement("div");
+    const labelEl = document.createElement("strong");
+    labelEl.textContent = entry.label;
+    const tzEl = document.createElement("div");
+    tzEl.className = "tz-name";
+    tzEl.textContent = entry.tz;
+    left.append(labelEl, tzEl);
+
+    if (alreadyPicked) {
+      const note = document.createElement("span");
+      note.className = "already-picked";
+      note.textContent = "picked";
+      li.append(left, note);
+    } else {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.textContent = isFull ? "Full" : "Add";
+      btn.disabled = isFull;
+      btn.addEventListener("click", () => {
+        addPick({ label: entry.label, tz: entry.tz });
+      });
+      li.append(left, btn);
+    }
+    resultsEl.appendChild(li);
+  }
+
+  function addPick(pick: UserCity): void {
+    if (worldPicks.length >= MAX_WORLD_PICKS) return;
+    if (worldPicks.some((p) => p.tz === pick.tz)) return;
+    worldPicks = [...worldPicks, pick];
+    persistAndPush();
+  }
+
+  function removePick(tz: string): void {
+    worldPicks = worldPicks.filter((p) => p.tz !== tz);
+    persistAndPush();
+  }
+
+  function resetPicks(): void {
+    worldPicks = [...DEFAULT_WORLD_PICKS];
+    persistAndPush();
+  }
+
+  function persistAndPush(): void {
+    void saveWorldPicks(worldPicks, currentBridge);
+    renderPicks();
+    renderResults();
+    void pushWorldIfShowing();
+  }
+
+  async function pushWorldIfShowing(): Promise<void> {
+    const bridge = currentBridge;
+    if (!bridge) return;
+    if (VIEWS[currentViewIndex] !== "world") return;
+    try {
+      // Pick count or label widths may have changed — rebuild the page.
+      await applyPage(bridge, buildView("world"));
+    } catch {
+      /* minute tick will retry */
+    }
+  }
+
+  searchEl.addEventListener("input", () => {
+    query = searchEl.value;
+    renderResults();
+  });
+
+  if (resetEl) {
+    resetEl.addEventListener("click", (e) => {
+      e.preventDefault();
+      resetPicks();
+    });
+  }
+
+  renderPicks();
+  renderResults();
 }
 
 start().catch((err) => {
