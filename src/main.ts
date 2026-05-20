@@ -10,7 +10,11 @@ import {
   ImageRawDataUpdateResult,
   OsEventTypeList,
 } from "@evenrealities/even_hub_sdk";
-import { US_OUTLINE_POLYLINES, US_OUTLINE_BOUNDS } from "./us-outline";
+import {
+  US_OUTLINE_POLYLINES,
+  US_STATE_BORDER_POLYLINES,
+  US_OUTLINE_BOUNDS,
+} from "./us-outline";
 
 type Bridge = NonNullable<Awaited<ReturnType<typeof waitForEvenAppBridge>>>;
 
@@ -615,15 +619,7 @@ function renderPhone(): void {
   clocksEl.textContent = buildListContent();
 }
 
-// ---- Map drawing (US outline from us-atlas, AK + 48, no HI) ----
-
-// Approximate Albers USA x-coords for the US time-zone meridians
-// (Pacific/Mountain ~120°W, Mountain/Central ~104°W, Central/Eastern ~87°W),
-// plus the y-range of the contiguous 48 in source coords. Eyeballed against
-// us-atlas states-albers-10m; close enough for visual dividers.
-const TZ_DIVIDER_X = [275, 445, 625];
-const TZ_DIVIDER_Y_TOP = 70;
-const TZ_DIVIDER_Y_BOTTOM = 470;
+// ---- Map drawing (US outline + state borders from us-atlas, AK + 48, no HI) ----
 
 const MAP_STROKE = "#22ff66";
 
@@ -638,34 +634,42 @@ function drawUsMap(ctx: CanvasRenderingContext2D, w: number, h: number): void {
   const ox = (w - srcW * scale) / 2 - minX * scale;
   const oy = (h - srcH * scale) / 2 - minY * scale;
 
-  const lineWidth = Math.max(1, w / 400);
-  const glow = Math.max(2, w / 120);
-  const dash = Math.max(2, w / 120);
+  const outlineWidth = Math.max(1, w / 400);
+  const borderWidth = Math.max(0.5, w / 800);
+  const outlineGlow = Math.max(2, w / 120);
+  const borderGlow = Math.max(1, w / 300);
+  const borderDash = Math.max(1.5, w / 200);
 
   ctx.lineJoin = "round";
   ctx.lineCap = "round";
   ctx.strokeStyle = MAP_STROKE;
-  ctx.shadowColor = MAP_STROKE;
-  ctx.shadowBlur = glow;
 
-  // Time-zone dividers (dashed, vertical, contiguous US only). Drawn first so
-  // the solid outline overpaints them where they touch the coast.
+  // State borders first — dotted, thinner, less glow. Drawn underneath so the
+  // outer outline paints over them cleanly along the coast/border.
   ctx.save();
-  ctx.lineWidth = lineWidth;
-  ctx.setLineDash([dash, dash * 1.5]);
-  for (const px of TZ_DIVIDER_X) {
-    const x = ox + px * scale;
-    const yTop = oy + TZ_DIVIDER_Y_TOP * scale;
-    const yBot = oy + TZ_DIVIDER_Y_BOTTOM * scale;
+  ctx.lineWidth = borderWidth;
+  ctx.setLineDash([borderDash, borderDash * 2]);
+  ctx.shadowColor = MAP_STROKE;
+  ctx.shadowBlur = borderGlow;
+  for (const line of US_STATE_BORDER_POLYLINES) {
+    if (line.length < 2) continue;
     ctx.beginPath();
-    ctx.moveTo(x, yTop);
-    ctx.lineTo(x, yBot);
+    for (let i = 0; i < line.length; i++) {
+      const [px, py] = line[i];
+      const x = ox + px * scale;
+      const y = oy + py * scale;
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    }
     ctx.stroke();
   }
   ctx.restore();
 
-  // Solid outline.
-  ctx.lineWidth = lineWidth;
+  // Outer outline on top — solid, bright, glowy.
+  ctx.save();
+  ctx.lineWidth = outlineWidth;
+  ctx.shadowColor = MAP_STROKE;
+  ctx.shadowBlur = outlineGlow;
   for (const line of US_OUTLINE_POLYLINES) {
     if (line.length < 2) continue;
     ctx.beginPath();
@@ -678,6 +682,7 @@ function drawUsMap(ctx: CanvasRenderingContext2D, w: number, h: number): void {
     }
     ctx.stroke();
   }
+  ctx.restore();
 
   ctx.shadowBlur = 0;
 }
