@@ -161,6 +161,128 @@ function currentWorldZones(): Zone[] {
   }));
 }
 
+// ---- Approximate coordinates for sunrise/sunset (phone page) ----
+
+const TZ_COORDS: Record<string, { lat: number; lon: number }> = {
+  // US (matches ZONES)
+  "America/New_York":               { lat: 40.7128, lon: -74.0060 },
+  "America/Chicago":                { lat: 41.8781, lon: -87.6298 },
+  "America/Denver":                 { lat: 39.7392, lon: -104.9903 },
+  "America/Los_Angeles":            { lat: 34.0522, lon: -118.2437 },
+  "America/Anchorage":              { lat: 61.2181, lon: -149.9003 },
+  "Pacific/Honolulu":               { lat: 21.3099, lon: -157.8581 },
+  // Other Americas (CITY_CATALOG)
+  "America/Toronto":                { lat: 43.6532, lon: -79.3832 },
+  "America/Mexico_City":            { lat: 19.4326, lon: -99.1332 },
+  "America/Bogota":                 { lat: 4.7110,  lon: -74.0721 },
+  "America/Lima":                   { lat: -12.0464, lon: -77.0428 },
+  "America/Santiago":               { lat: -33.4489, lon: -70.6693 },
+  "America/Sao_Paulo":              { lat: -23.5505, lon: -46.6333 },
+  "America/Argentina/Buenos_Aires": { lat: -34.6037, lon: -58.3816 },
+  // Europe
+  "Atlantic/Reykjavik":             { lat: 64.1466, lon: -21.9426 },
+  "Europe/Dublin":                  { lat: 53.3498, lon: -6.2603 },
+  "Europe/London":                  { lat: 51.5074, lon: -0.1278 },
+  "Europe/Lisbon":                  { lat: 38.7223, lon: -9.1393 },
+  "Europe/Madrid":                  { lat: 40.4168, lon: -3.7038 },
+  "Europe/Paris":                   { lat: 48.8566, lon: 2.3522 },
+  "Europe/Amsterdam":               { lat: 52.3676, lon: 4.9041 },
+  "Europe/Berlin":                  { lat: 52.5200, lon: 13.4050 },
+  "Europe/Rome":                    { lat: 41.9028, lon: 12.4964 },
+  "Europe/Stockholm":               { lat: 59.3293, lon: 18.0686 },
+  "Europe/Helsinki":                { lat: 60.1699, lon: 24.9384 },
+  "Europe/Warsaw":                  { lat: 52.2297, lon: 21.0122 },
+  "Europe/Athens":                  { lat: 37.9838, lon: 23.7275 },
+  "Europe/Istanbul":                { lat: 41.0082, lon: 28.9784 },
+  "Europe/Moscow":                  { lat: 55.7558, lon: 37.6173 },
+  // Africa
+  "Africa/Lagos":                   { lat: 6.5244,  lon: 3.3792 },
+  "Africa/Cairo":                   { lat: 30.0444, lon: 31.2357 },
+  "Africa/Johannesburg":            { lat: -33.9249, lon: 18.4241 }, // Cape Town
+  "Africa/Nairobi":                 { lat: -1.2921, lon: 36.8219 },
+  // Middle East
+  "Asia/Jerusalem":                 { lat: 32.0853, lon: 34.7818 },
+  "Asia/Riyadh":                    { lat: 24.7136, lon: 46.6753 },
+  "Asia/Tehran":                    { lat: 35.6892, lon: 51.3890 },
+  "Asia/Dubai":                     { lat: 25.2048, lon: 55.2708 },
+  // Asia
+  "Asia/Karachi":                   { lat: 24.8607, lon: 67.0011 },
+  "Asia/Kolkata":                   { lat: 19.0760, lon: 72.8777 }, // Mumbai
+  "Asia/Kathmandu":                 { lat: 27.7172, lon: 85.3240 },
+  "Asia/Dhaka":                     { lat: 23.8103, lon: 90.4125 },
+  "Asia/Bangkok":                   { lat: 13.7563, lon: 100.5018 },
+  "Asia/Jakarta":                   { lat: -6.2088, lon: 106.8456 },
+  "Asia/Singapore":                 { lat: 1.3521,  lon: 103.8198 },
+  "Asia/Manila":                    { lat: 14.5995, lon: 120.9842 },
+  "Asia/Hong_Kong":                 { lat: 22.3193, lon: 114.1694 },
+  "Asia/Shanghai":                  { lat: 31.2304, lon: 121.4737 },
+  "Asia/Taipei":                    { lat: 25.0330, lon: 121.5654 },
+  "Asia/Seoul":                     { lat: 37.5665, lon: 126.9780 },
+  "Asia/Tokyo":                     { lat: 35.6762, lon: 139.6503 },
+  // Oceania
+  "Australia/Perth":                { lat: -31.9505, lon: 115.8605 },
+  "Australia/Adelaide":             { lat: -34.9285, lon: 138.6007 },
+  "Australia/Brisbane":             { lat: -27.4698, lon: 153.0251 },
+  "Australia/Sydney":               { lat: -33.8688, lon: 151.2093 },
+  "Pacific/Auckland":               { lat: -36.8485, lon: 174.7633 },
+  "Pacific/Fiji":                   { lat: -18.1248, lon: 178.4501 },
+};
+
+// NOAA-style sunrise/sunset for a date at the given lat/lon. Returns null
+// values when the sun doesn't rise / doesn't set on that date (polar
+// regions in summer/winter).
+function sunriseSunset(
+  date: Date,
+  lat: number,
+  lon: number,
+): { rise: Date | null; set: Date | null; allDay: boolean; allNight: boolean } {
+  const yearStart = Date.UTC(date.getUTCFullYear(), 0, 0);
+  const N = Math.floor((date.getTime() - yearStart) / 86_400_000);
+  const gamma = (2 * Math.PI / 365) * (N - 1);
+
+  const dec =
+    0.006918 -
+    0.399912 * Math.cos(gamma) +
+    0.070257 * Math.sin(gamma) -
+    0.006758 * Math.cos(2 * gamma) +
+    0.000907 * Math.sin(2 * gamma) -
+    0.002697 * Math.cos(3 * gamma) +
+    0.001480 * Math.sin(3 * gamma);
+
+  const eot =
+    229.18 *
+    (0.000075 +
+      0.001868 * Math.cos(gamma) -
+      0.032077 * Math.sin(gamma) -
+      0.014615 * Math.cos(2 * gamma) -
+      0.040849 * Math.sin(2 * gamma));
+
+  const latRad = (lat * Math.PI) / 180;
+  const zenithRad = (90.833 * Math.PI) / 180;
+  const cosH =
+    (Math.cos(zenithRad) - Math.sin(latRad) * Math.sin(dec)) /
+    (Math.cos(latRad) * Math.cos(dec));
+
+  if (cosH > 1)  return { rise: null, set: null, allDay: false, allNight: true };
+  if (cosH < -1) return { rise: null, set: null, allDay: true,  allNight: false };
+
+  const H = Math.acos(cosH);
+  const Hdeg = (H * 180) / Math.PI;
+  const baseUtc = Date.UTC(
+    date.getUTCFullYear(),
+    date.getUTCMonth(),
+    date.getUTCDate(),
+  );
+  const riseUtcMin = 720 - 4 * (lon + Hdeg) - eot;
+  const setUtcMin  = 720 - 4 * (lon - Hdeg) - eot;
+  return {
+    rise: new Date(baseUtc + riseUtcMin * 60_000),
+    set:  new Date(baseUtc + setUtcMin  * 60_000),
+    allDay: false,
+    allNight: false,
+  };
+}
+
 const MAP_W = 200;
 const MAP_H = 100;
 const MAP_CONTAINER_ID = 100;
@@ -173,6 +295,9 @@ const versionEl = document.getElementById("version") as HTMLSpanElement | null;
 const dstStatusEl = document.getElementById("dst-status") as HTMLParagraphElement | null;
 const dstNextEl = document.getElementById("dst-next") as HTMLParagraphElement | null;
 const factEl = document.getElementById("fact") as HTMLParagraphElement | null;
+const sunSectionEl = document.getElementById("sun-section") as HTMLElement | null;
+const sunRiseSetEl = document.getElementById("sun-rise-set") as HTMLParagraphElement | null;
+const sunDaylightEl = document.getElementById("sun-daylight") as HTMLParagraphElement | null;
 if (versionEl) versionEl.textContent = `v${__APP_VERSION__}`;
 
 const DST_FACTS = [
@@ -245,6 +370,44 @@ function renderFact(): void {
   if (!factEl) return;
   factEl.textContent = DST_FACTS[factIndex];
   factIndex = (factIndex + 1) % DST_FACTS.length;
+}
+
+function renderSunTimes(): void {
+  if (!sunSectionEl || !sunRiseSetEl || !sunDaylightEl) return;
+  const coords = TZ_COORDS[LOCAL_TZ];
+  if (!coords) {
+    // Hide the section entirely when we don't have coordinates for the
+    // device's zone — a missing data row is better than a wrong sunset time.
+    sunSectionEl.style.display = "none";
+    return;
+  }
+  sunSectionEl.style.display = "";
+  const now = new Date();
+  const result = sunriseSunset(now, coords.lat, coords.lon);
+  if (result.allDay) {
+    sunRiseSetEl.textContent = "Midnight sun — the sun doesn't set today.";
+    sunDaylightEl.textContent = "";
+    return;
+  }
+  if (result.allNight) {
+    sunRiseSetEl.textContent = "Polar night — the sun doesn't rise today.";
+    sunDaylightEl.textContent = "";
+    return;
+  }
+  const rise = result.rise as Date;
+  const set = result.set as Date;
+  const fmtTime = (d: Date) =>
+    d.toLocaleTimeString("en-US", {
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: settings.timeFormat === "12h",
+    });
+  const cityFromTz = LOCAL_TZ.split("/").pop()?.replace(/_/g, " ") ?? LOCAL_TZ;
+  sunRiseSetEl.textContent = `Sunrise ${fmtTime(rise)} · Sunset ${fmtTime(set)} · ${cityFromTz}`;
+  const dayLengthMin = Math.round((set.getTime() - rise.getTime()) / 60_000);
+  const h = Math.floor(dayLengthMin / 60);
+  const m = dayLengthMin % 60;
+  sunDaylightEl.textContent = `Daylight ${h}h ${m.toString().padStart(2, "0")}m`;
 }
 
 // ---- Settings & persistence ----
@@ -437,8 +600,9 @@ function buildListContent(
     if (compact) {
       return `${label.padEnd(widest)}  ${dayTime}`;
     }
-    const offset = isLocal ? "   " : formatOffsetVsLocal(tz, when).padStart(3);
-    return `${label.padEnd(widest)}  ${dayTime}  ${offset}  ${glyph}`;
+    const abbr = getZoneAbbr(tz, when).padEnd(4);
+    const offset = isLocal ? "     " : formatOffsetVsLocal(tz, when).padEnd(5);
+    return `${label.padEnd(widest)}  ${abbr}  ${dayTime}  ${offset}  ${glyph}`;
   }
 
   return [
@@ -518,37 +682,37 @@ function drawUsMap(ctx: CanvasRenderingContext2D, w: number, h: number): void {
   ctx.shadowBlur = 0;
 }
 
-// ---- DST countdown banner (lens) ----
+// ---- Top banner (date + optional DST countdown) ----
 
-const DST_BANNER_ID = 50;
-const DST_BANNER_NAME = "dst-banner";
+const BANNER_ID = 50;
+const BANNER_NAME = "banner";
 const DST_BANNER_WINDOW_DAYS = 14;
 
-// Returns the lens banner text when the next DST transition is within the
-// notification window, otherwise an empty string (banner shows nothing).
-function nextDstBannerText(now: Date): string {
-  const next = nextDstTransition(now);
-  const dayMs = 86_400_000;
-  const daysUntil = Math.ceil((next.date.getTime() - now.getTime()) / dayMs);
-  if (daysUntil <= 0 || daysUntil > DST_BANNER_WINDOW_DAYS) return "";
-  const dateStr = next.date.toLocaleDateString("en-US", {
+// Banner shows today's date always. When the next US DST transition is within
+// the notification window, the countdown is appended after a separator.
+function topBannerText(now: Date): string {
+  const dateStr = now.toLocaleDateString("en-US", {
     weekday: "short",
     month: "short",
     day: "numeric",
+    year: "numeric",
   });
-  const days = `${daysUntil} day${daysUntil === 1 ? "" : "s"}`;
-  return `DST ${next.type} in ${days} (${dateStr})`;
+  const next = nextDstTransition(now);
+  const dayMs = 86_400_000;
+  const daysUntil = Math.ceil((next.date.getTime() - now.getTime()) / dayMs);
+  if (daysUntil <= 0 || daysUntil > DST_BANNER_WINDOW_DAYS) return dateStr;
+  return `${dateStr}  ·  DST ${next.type} in ${daysUntil}d`;
 }
 
-function dstBannerContainer(): TextContainerProperty {
+function topBannerContainer(): TextContainerProperty {
   return new TextContainerProperty({
-    xPosition: 80,
+    xPosition: 30,
     yPosition: 4,
-    width: 416,
+    width: 516,
     height: 22,
-    containerID: DST_BANNER_ID,
-    containerName: DST_BANNER_NAME,
-    content: nextDstBannerText(new Date()),
+    containerID: BANNER_ID,
+    containerName: BANNER_NAME,
+    content: topBannerText(new Date()),
     isEventCapture: 0,
   });
 }
@@ -577,10 +741,14 @@ const VIEWS: ViewKind[] = ["column", "positions", "map", "world"];
 // steady state.
 function colLayoutFor(fmt: TimeFormat, widestLabelChars: number) {
   // ~12px per char in the LVGL font on the G2; allow 12px slack.
-  const labelsX = 90;
+  // Five columns: label | abbr | day-time | offset | glyph. Each anchored at a
+  // fixed x so the LVGL font's non-monospaced glyphs can't break alignment.
+  const labelsX = 30;
   const minLabelsWidth = 110;
   const labelsWidth = Math.max(minLabelsWidth, widestLabelChars * 12 + 12);
-  const timesX = labelsX + labelsWidth + 10;
+  const abbrsX = labelsX + labelsWidth + 8;
+  const abbrsWidth = 60; // fits "EDT" / "AEDT" / "GMT+4"
+  const timesX = abbrsX + abbrsWidth + 8;
   const timesWidth = fmt === "12h" ? 170 : 130;
   const gapBeforeOffset = 14;
   const offsetsX = timesX + timesWidth + gapBeforeOffset;
@@ -590,6 +758,7 @@ function colLayoutFor(fmt: TimeFormat, widestLabelChars: number) {
     yPosition: 30,
     height: 232,
     labels:  { xPosition: labelsX,  width: labelsWidth },
+    abbrs:   { xPosition: abbrsX,   width: abbrsWidth },
     times:   { xPosition: timesX,   width: timesWidth },
     offsets: { xPosition: offsetsX, width: offsetsWidth },
     glyphs:  { xPosition: glyphsX,  width: 40 },
@@ -598,21 +767,25 @@ function colLayoutFor(fmt: TimeFormat, widestLabelChars: number) {
 
 function buildColumnViewParts(zones: Zone[], when: Date = new Date()): {
   labels: string;
+  abbrs: string;
   times: string;
   offsets: string;
   glyphs: string;
 } {
   const labels = [LOCAL_LABEL, ...zones.map((z) => z.label)].join("\n");
+  const abbrs: string[] = [getZoneAbbr(LOCAL_TZ, when)];
   const times: string[] = [formatDayTime(null, when)];
   const offsets: string[] = [""]; // Local is the reference — no offset.
   const glyphs: string[] = [statusGlyph(LOCAL_TZ, when)];
   for (const z of zones) {
+    abbrs.push(getZoneAbbr(z.tz, when));
     times.push(formatDayTime(z.tz, when));
     offsets.push(formatOffsetVsLocal(z.tz, when));
     glyphs.push(statusGlyph(z.tz, when));
   }
   return {
     labels,
+    abbrs: abbrs.join("\n"),
     times: times.join("\n"),
     offsets: offsets.join("\n"),
     glyphs: glyphs.join("\n"),
@@ -628,7 +801,7 @@ function buildColumnView(zones: Zone[]) {
   const layout = colLayoutFor(settings.timeFormat, widest);
   const { yPosition, height } = layout;
   const containers = [
-    dstBannerContainer(),
+    topBannerContainer(),
     new TextContainerProperty({
       ...layout.labels,
       yPosition,
@@ -637,6 +810,15 @@ function buildColumnView(zones: Zone[]) {
       containerName: "labels",
       content: parts.labels,
       isEventCapture: 1,
+    }),
+    new TextContainerProperty({
+      ...layout.abbrs,
+      yPosition,
+      height,
+      containerID: 5,
+      containerName: "abbrs",
+      content: parts.abbrs,
+      isEventCapture: 0,
     }),
     new TextContainerProperty({
       ...layout.times,
@@ -689,7 +871,7 @@ function buildPositionsView() {
         isEventCapture: i === 0 ? 1 : 0,
       }),
   );
-  const textObject = [dstBannerContainer(), ...positions];
+  const textObject = [topBannerContainer(), ...positions];
   return { containerTotalNum: textObject.length, textObject };
 }
 
@@ -717,7 +899,7 @@ function buildMapView() {
     containerID: MAP_CONTAINER_ID,
     containerName: MAP_CONTAINER_NAME,
   });
-  const textObject = [dstBannerContainer(), list];
+  const textObject = [topBannerContainer(), list];
   return {
     containerTotalNum: textObject.length + 1, // +1 for the image
     textObject,
@@ -811,14 +993,14 @@ async function pushListContainer(bridge: Bridge, opts: { compact?: boolean } = {
   );
 }
 
-async function pushDstBanner(bridge: Bridge): Promise<void> {
+async function pushTopBanner(bridge: Bridge): Promise<void> {
   await bridge.textContainerUpgrade(
     new TextContainerUpgrade({
-      containerID: DST_BANNER_ID,
-      containerName: DST_BANNER_NAME,
+      containerID: BANNER_ID,
+      containerName: BANNER_NAME,
       contentOffset: 0,
       contentLength: 0,
-      content: nextDstBannerText(new Date()),
+      content: topBannerText(new Date()),
     }),
   );
 }
@@ -828,6 +1010,7 @@ async function pushColumnContainers(bridge: Bridge, zones: Zone[]): Promise<void
   // SDK warns against concurrent sends — serialise.
   const updates: Array<[number, string, string]> = [
     [1, "labels",  parts.labels],
+    [5, "abbrs",   parts.abbrs],
     [2, "times",   parts.times],
     [3, "offsets", parts.offsets],
     [4, "glyphs",  parts.glyphs],
@@ -921,7 +1104,7 @@ async function refreshCurrentView(): Promise<void> {
   else if (view === "column") await pushColumnContainers(bridge, ZONES);
   else if (view === "world") await pushColumnContainers(bridge, currentWorldZones());
   else await pushListContainer(bridge, { compact: true }); // map view
-  await pushDstBanner(bridge);
+  await pushTopBanner(bridge);
 }
 
 async function start(): Promise<void> {
@@ -940,6 +1123,11 @@ async function start(): Promise<void> {
 
   renderFact();
   setInterval(renderFact, 8_000);
+
+  renderSunTimes();
+  // Sunrise/sunset shift slowly over the day; re-checking every minute also
+  // catches midnight rollover within a minute.
+  setInterval(renderSunTimes, 60_000);
 
   if (mapEl) {
     const pctx = mapEl.getContext("2d");
@@ -1070,6 +1258,7 @@ function wireSettingsUi(): void {
       if (v !== "24h" && v !== "12h") return;
       settings = { ...settings, timeFormat: v };
       renderPhone();
+      renderSunTimes();
       await saveSettings(settings, currentBridge);
       // Column view's container positions depend on the format, so a flip
       // requires a page rebuild. Other views just need a content refresh.
