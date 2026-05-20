@@ -739,16 +739,24 @@ const VIEWS: ViewKind[] = ["column", "positions", "map", "world"];
 // The page is rebuilt on a format flip or a picks change; the minute-tick path
 // only does content upgrades, so per-format/per-picks layouts cost nothing at
 // steady state.
-function colLayoutFor(fmt: TimeFormat, widestLabelChars: number) {
+function colLayoutFor(
+  fmt: TimeFormat,
+  widestLabelChars: number,
+  showAbbr: boolean,
+) {
   // ~12px per char in the LVGL font on the G2; allow 12px slack.
-  // Five columns: label | abbr | day-time | offset | glyph. Each anchored at a
+  // Columns: label | (abbr) | day-time | offset | glyph. Each anchored at a
   // fixed x so the LVGL font's non-monospaced glyphs can't break alignment.
-  const labelsX = 30;
+  // Abbr column is only shown for the US Column view — for the World view,
+  // Intl often falls back to GMT+N which duplicates the offset column AND
+  // can overflow into the next line. World view skips abbr entirely.
+  const labelsX = showAbbr ? 30 : 90;
   const minLabelsWidth = 110;
   const labelsWidth = Math.max(minLabelsWidth, widestLabelChars * 12 + 12);
-  const abbrsX = labelsX + labelsWidth + 8;
-  const abbrsWidth = 60; // fits "EDT" / "AEDT" / "GMT+4"
-  const timesX = abbrsX + abbrsWidth + 8;
+  const abbrsWidth = 60;
+  const timesX = showAbbr
+    ? labelsX + labelsWidth + 8 + abbrsWidth + 8
+    : labelsX + labelsWidth + 10;
   const timesWidth = fmt === "12h" ? 170 : 130;
   const gapBeforeOffset = 14;
   const offsetsX = timesX + timesWidth + gapBeforeOffset;
@@ -758,7 +766,8 @@ function colLayoutFor(fmt: TimeFormat, widestLabelChars: number) {
     yPosition: 30,
     height: 232,
     labels:  { xPosition: labelsX,  width: labelsWidth },
-    abbrs:   { xPosition: abbrsX,   width: abbrsWidth },
+    abbrs:   { xPosition: showAbbr ? labelsX + labelsWidth + 8 : 0,
+               width: showAbbr ? abbrsWidth : 0 },
     times:   { xPosition: timesX,   width: timesWidth },
     offsets: { xPosition: offsetsX, width: offsetsWidth },
     glyphs:  { xPosition: glyphsX,  width: 40 },
@@ -792,15 +801,15 @@ function buildColumnViewParts(zones: Zone[], when: Date = new Date()): {
   };
 }
 
-function buildColumnView(zones: Zone[]) {
+function buildColumnView(zones: Zone[], showAbbr: boolean) {
   const parts = buildColumnViewParts(zones);
   const widest = Math.max(
     LOCAL_LABEL.length,
     ...zones.map((z) => z.label.length),
   );
-  const layout = colLayoutFor(settings.timeFormat, widest);
+  const layout = colLayoutFor(settings.timeFormat, widest, showAbbr);
   const { yPosition, height } = layout;
-  const containers = [
+  const containers: TextContainerProperty[] = [
     topBannerContainer(),
     new TextContainerProperty({
       ...layout.labels,
@@ -811,15 +820,21 @@ function buildColumnView(zones: Zone[]) {
       content: parts.labels,
       isEventCapture: 1,
     }),
-    new TextContainerProperty({
-      ...layout.abbrs,
-      yPosition,
-      height,
-      containerID: 5,
-      containerName: "abbrs",
-      content: parts.abbrs,
-      isEventCapture: 0,
-    }),
+  ];
+  if (showAbbr) {
+    containers.push(
+      new TextContainerProperty({
+        ...layout.abbrs,
+        yPosition,
+        height,
+        containerID: 5,
+        containerName: "abbrs",
+        content: parts.abbrs,
+        isEventCapture: 0,
+      }),
+    );
+  }
+  containers.push(
     new TextContainerProperty({
       ...layout.times,
       yPosition,
@@ -847,7 +862,7 @@ function buildColumnView(zones: Zone[]) {
       content: parts.glyphs,
       isEventCapture: 0,
     }),
-  ];
+  );
   return { containerTotalNum: containers.length, textObject: containers };
 }
 
@@ -908,8 +923,8 @@ function buildMapView() {
 }
 
 function buildView(view: ViewKind) {
-  if (view === "column") return buildColumnView(ZONES);
-  if (view === "world") return buildColumnView(currentWorldZones());
+  if (view === "column") return buildColumnView(ZONES, true);
+  if (view === "world") return buildColumnView(currentWorldZones(), false);
   if (view === "positions") return buildPositionsView();
   return buildMapView();
 }
@@ -1005,16 +1020,22 @@ async function pushTopBanner(bridge: Bridge): Promise<void> {
   );
 }
 
-async function pushColumnContainers(bridge: Bridge, zones: Zone[]): Promise<void> {
+async function pushColumnContainers(
+  bridge: Bridge,
+  zones: Zone[],
+  showAbbr: boolean,
+): Promise<void> {
   const parts = buildColumnViewParts(zones);
   // SDK warns against concurrent sends — serialise.
   const updates: Array<[number, string, string]> = [
     [1, "labels",  parts.labels],
-    [5, "abbrs",   parts.abbrs],
+  ];
+  if (showAbbr) updates.push([5, "abbrs", parts.abbrs]);
+  updates.push(
     [2, "times",   parts.times],
     [3, "offsets", parts.offsets],
     [4, "glyphs",  parts.glyphs],
-  ];
+  );
   for (const [id, name, content] of updates) {
     await bridge.textContainerUpgrade(
       new TextContainerUpgrade({
@@ -1101,8 +1122,8 @@ async function refreshCurrentView(): Promise<void> {
   if (!bridge) return;
   const view = VIEWS[currentViewIndex];
   if (view === "positions") await pushPositionContainers(bridge);
-  else if (view === "column") await pushColumnContainers(bridge, ZONES);
-  else if (view === "world") await pushColumnContainers(bridge, currentWorldZones());
+  else if (view === "column") await pushColumnContainers(bridge, ZONES, true);
+  else if (view === "world") await pushColumnContainers(bridge, currentWorldZones(), false);
   else await pushListContainer(bridge, { compact: true }); // map view
   await pushTopBanner(bridge);
 }
