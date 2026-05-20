@@ -705,11 +705,12 @@ function topBannerText(now: Date): string {
 }
 
 function topBannerContainer(): TextContainerProperty {
+  // h=30 (not 22) so descenders (y in May, g in August) render in-frame.
   return new TextContainerProperty({
     xPosition: 30,
     yPosition: 4,
     width: 516,
-    height: 22,
+    height: 30,
     containerID: BANNER_ID,
     containerName: BANNER_NAME,
     content: topBannerText(new Date()),
@@ -762,8 +763,11 @@ function colLayoutFor(
   const offsetsX = timesX + timesWidth + gapBeforeOffset;
   const offsetsWidth = 65;
   const glyphsX = offsetsX + offsetsWidth + 6;
+  // y=44 (not 30) gives a clear gap below the taller banner (banner ends at
+  // y=34 with h=30). Height stays at 232 — 7 rows still fit comfortably,
+  // ending at y=276 with 12 px of canvas margin below.
   return {
-    yPosition: 30,
+    yPosition: 44,
     height: 232,
     labels:  { xPosition: labelsX,  width: labelsWidth },
     abbrs:   { xPosition: showAbbr ? labelsX + labelsWidth + 8 : 0,
