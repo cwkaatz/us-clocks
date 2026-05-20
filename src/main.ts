@@ -346,14 +346,28 @@ const VIEWS: ViewKind[] = ["column", "positions", "map"];
 // align columns on the lens. We split the column view into four side-by-side
 // text containers anchored at fixed x positions, so each column starts at the
 // same pixel column regardless of how wide the rendered text is.
-const COL_LAYOUT = {
-  yPosition: 30,
-  height: 232,
-  labels:  { xPosition: 90,  width: 110 },
-  times:   { xPosition: 210, width: 180 },
-  offsets: { xPosition: 410, width: 70 },
-  glyphs:  { xPosition: 500, width: 40 },
-} as const;
+//
+// The offset/glyph column positions depend on the current time format: 12h
+// strings ("Tue 09:55 PM") render visibly wider than 24h ("Tue 09:55"), so
+// in 24h mode we slide the right-side columns left to close the gap. The
+// page is rebuilt on a format flip; the minute-tick path only does content
+// upgrades, so per-format layouts cost nothing at steady state.
+function colLayoutFor(fmt: TimeFormat) {
+  const timesX = 210;
+  const timesWidth = fmt === "12h" ? 170 : 130;
+  const gapBeforeOffset = 14;
+  const offsetsX = timesX + timesWidth + gapBeforeOffset;
+  const offsetsWidth = 55;
+  const glyphsX = offsetsX + offsetsWidth + 6;
+  return {
+    yPosition: 30,
+    height: 232,
+    labels:  { xPosition: 90,       width: 110 },
+    times:   { xPosition: timesX,   width: timesWidth },
+    offsets: { xPosition: offsetsX, width: offsetsWidth },
+    glyphs:  { xPosition: glyphsX,  width: 40 },
+  };
+}
 
 function buildColumnViewParts(when: Date = new Date()): {
   labels: string;
@@ -380,10 +394,11 @@ function buildColumnViewParts(when: Date = new Date()): {
 
 function buildColumnView() {
   const parts = buildColumnViewParts();
-  const { yPosition, height } = COL_LAYOUT;
+  const layout = colLayoutFor(settings.timeFormat);
+  const { yPosition, height } = layout;
   const containers = [
     new TextContainerProperty({
-      ...COL_LAYOUT.labels,
+      ...layout.labels,
       yPosition,
       height,
       containerID: 1,
@@ -392,7 +407,7 @@ function buildColumnView() {
       isEventCapture: 1,
     }),
     new TextContainerProperty({
-      ...COL_LAYOUT.times,
+      ...layout.times,
       yPosition,
       height,
       containerID: 2,
@@ -401,7 +416,7 @@ function buildColumnView() {
       isEventCapture: 0,
     }),
     new TextContainerProperty({
-      ...COL_LAYOUT.offsets,
+      ...layout.offsets,
       yPosition,
       height,
       containerID: 3,
@@ -410,7 +425,7 @@ function buildColumnView() {
       isEventCapture: 0,
     }),
     new TextContainerProperty({
-      ...COL_LAYOUT.glyphs,
+      ...layout.glyphs,
       yPosition,
       height,
       containerID: 4,
@@ -726,9 +741,15 @@ function wireSettingsUi(): void {
       settings = { ...settings, timeFormat: v };
       renderPhone();
       await saveSettings(settings, currentBridge);
-      // If the bridge is up, push the new format to whichever view is showing.
+      // Column view's container positions depend on the format, so a flip
+      // requires a page rebuild. Other views just need a content refresh.
       try {
-        await refreshCurrentView();
+        const bridge = currentBridge;
+        if (bridge && VIEWS[currentViewIndex] === "column") {
+          await applyPage(bridge, buildView("column"));
+        } else {
+          await refreshCurrentView();
+        }
       } catch {
         /* ignore — minute tick will retry */
       }
