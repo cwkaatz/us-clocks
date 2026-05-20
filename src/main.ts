@@ -342,20 +342,84 @@ function drawUsMap(ctx: CanvasRenderingContext2D, w: number, h: number): void {
 type ViewKind = "column" | "positions" | "map";
 const VIEWS: ViewKind[] = ["column", "positions", "map"];
 
+// The G2 LVGL font is NOT monospaced — padding strings with spaces can't
+// align columns on the lens. We split the column view into four side-by-side
+// text containers anchored at fixed x positions, so each column starts at the
+// same pixel column regardless of how wide the rendered text is.
+const COL_LAYOUT = {
+  yPosition: 30,
+  height: 232,
+  labels:  { xPosition: 90,  width: 110 },
+  times:   { xPosition: 210, width: 180 },
+  offsets: { xPosition: 410, width: 70 },
+  glyphs:  { xPosition: 500, width: 40 },
+} as const;
+
+function buildColumnViewParts(when: Date = new Date()): {
+  labels: string;
+  times: string;
+  offsets: string;
+  glyphs: string;
+} {
+  const labels = [LOCAL_LABEL, ...ZONES.map((z) => z.label)].join("\n");
+  const times: string[] = [formatDayTime(null, when)];
+  const offsets: string[] = [""]; // Local is the reference — no offset.
+  const glyphs: string[] = [statusGlyph(LOCAL_TZ, when)];
+  for (const z of ZONES) {
+    times.push(formatDayTime(z.tz, when));
+    offsets.push(formatOffsetVsLocal(z.tz, when));
+    glyphs.push(statusGlyph(z.tz, when));
+  }
+  return {
+    labels,
+    times: times.join("\n"),
+    offsets: offsets.join("\n"),
+    glyphs: glyphs.join("\n"),
+  };
+}
+
 function buildColumnView() {
-  // Single text container, full-width-ish, centered vertically.
-  // Sized for six rows.
-  const list = new TextContainerProperty({
-    xPosition: 140,
-    yPosition: 30,
-    width: 360,
-    height: 232,
-    containerID: 1,
-    containerName: "list",
-    content: buildListContent(),
-    isEventCapture: 1,
-  });
-  return { containerTotalNum: 1, textObject: [list] };
+  const parts = buildColumnViewParts();
+  const { yPosition, height } = COL_LAYOUT;
+  const containers = [
+    new TextContainerProperty({
+      ...COL_LAYOUT.labels,
+      yPosition,
+      height,
+      containerID: 1,
+      containerName: "labels",
+      content: parts.labels,
+      isEventCapture: 1,
+    }),
+    new TextContainerProperty({
+      ...COL_LAYOUT.times,
+      yPosition,
+      height,
+      containerID: 2,
+      containerName: "times",
+      content: parts.times,
+      isEventCapture: 0,
+    }),
+    new TextContainerProperty({
+      ...COL_LAYOUT.offsets,
+      yPosition,
+      height,
+      containerID: 3,
+      containerName: "offsets",
+      content: parts.offsets,
+      isEventCapture: 0,
+    }),
+    new TextContainerProperty({
+      ...COL_LAYOUT.glyphs,
+      yPosition,
+      height,
+      containerID: 4,
+      containerName: "glyphs",
+      content: parts.glyphs,
+      isEventCapture: 0,
+    }),
+  ];
+  return { containerTotalNum: containers.length, textObject: containers };
 }
 
 function positionContent(z: Zone, when: Date = new Date()): string {
@@ -441,6 +505,28 @@ async function pushListContainer(bridge: Bridge, opts: { compact?: boolean } = {
   );
 }
 
+async function pushColumnContainers(bridge: Bridge): Promise<void> {
+  const parts = buildColumnViewParts();
+  // SDK warns against concurrent sends — serialise.
+  const updates: Array<[number, string, string]> = [
+    [1, "labels",  parts.labels],
+    [2, "times",   parts.times],
+    [3, "offsets", parts.offsets],
+    [4, "glyphs",  parts.glyphs],
+  ];
+  for (const [id, name, content] of updates) {
+    await bridge.textContainerUpgrade(
+      new TextContainerUpgrade({
+        containerID: id,
+        containerName: name,
+        contentOffset: 0,
+        contentLength: 0,
+        content,
+      }),
+    );
+  }
+}
+
 async function pushPositionContainers(bridge: Bridge): Promise<void> {
   const now = new Date();
   // Serialize — SDK docs warn against concurrent sends.
@@ -514,7 +600,8 @@ async function refreshCurrentView(): Promise<void> {
   if (!bridge) return;
   const view = VIEWS[currentViewIndex];
   if (view === "positions") await pushPositionContainers(bridge);
-  else await pushListContainer(bridge, view === "map" ? { compact: true } : {});
+  else if (view === "column") await pushColumnContainers(bridge);
+  else await pushListContainer(bridge, { compact: true }); // map view
 }
 
 async function start(): Promise<void> {
