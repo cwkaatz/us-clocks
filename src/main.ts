@@ -290,17 +290,25 @@ function sunriseSunset(
   };
 }
 
-// Lens map image dimensions. Contiguous 48 fills its 288×144 container
-// (the SDK's max width × max height); Alaska is rendered as a small inset
-// underneath.
-const CONTIG_MAP_W = 288;
-const CONTIG_MAP_H = 144;
-const CONTIG_MAP_ID = 100;
-const CONTIG_MAP_NAME = "map";
-// Alaska natural Albers-USA aspect ≈ 1.88 (261×139 source). 120×64 ≈ 1.875,
+// The lens contiguous map is split into TWO 288×91 image containers stacked
+// vertically. Combined they form a 288×182 visual area — ~60 % more pixels
+// than a single 288×144 container, because two stacked containers escape the
+// SDK's per-image 144 px height cap. Each container renders its half of the
+// contiguous bounds and the canvas auto-clips anything outside.
+const CONTIG_HALF_W = 288;
+const CONTIG_HALF_H = 91;
+const CONTIG_TOP_ID = 100;
+const CONTIG_TOP_NAME = "map-top";
+const CONTIG_BOTTOM_ID = 102;
+const CONTIG_BOTTOM_NAME = "map-bot";
+const CONTIG_SPLIT_Y =
+  Math.round((US_CONTIGUOUS_BOUNDS.minY + US_CONTIGUOUS_BOUNDS.maxY) / 2);
+const CONTIG_TOP_BOUNDS = { ...US_CONTIGUOUS_BOUNDS, maxY: CONTIG_SPLIT_Y };
+const CONTIG_BOTTOM_BOUNDS = { ...US_CONTIGUOUS_BOUNDS, minY: CONTIG_SPLIT_Y };
+// Alaska natural Albers-USA aspect ≈ 1.88 (261×139 source). 110×58 ≈ 1.90,
 // so the inset fills its container with essentially no letterboxing.
-const ALASKA_MAP_W = 120;
-const ALASKA_MAP_H = 64;
+const ALASKA_MAP_W = 110;
+const ALASKA_MAP_H = 58;
 const ALASKA_MAP_ID = 101;
 const ALASKA_MAP_NAME = "alaska";
 
@@ -673,18 +681,27 @@ function computeFit(w: number, h: number, bounds: Bounds) {
 
 // Contiguous 48 with all three layers: sparse intra-zone dots, solid TZ
 // borders, solid outer outline. Designed to fill its container width.
-function drawContiguousMap(ctx: CanvasRenderingContext2D, w: number, h: number): void {
+// `bounds` selects which slice of the source to render — pass
+// US_CONTIGUOUS_BOUNDS for the full map, or one of CONTIG_TOP_BOUNDS /
+// CONTIG_BOTTOM_BOUNDS to render just that half (the canvas auto-clips
+// content outside the visible area).
+function drawContiguousMap(
+  ctx: CanvasRenderingContext2D,
+  w: number,
+  h: number,
+  bounds: Bounds = US_CONTIGUOUS_BOUNDS,
+): void {
   ctx.fillStyle = "black";
   ctx.fillRect(0, 0, w, h);
 
-  // Clip drawing to the requested region so any off-bounds polylines (e.g.
-  // Florida Keys outside the trimmed contiguous bounds) don't bleed.
+  // Clip drawing to the requested region so any off-bounds polylines don't
+  // bleed past the container.
   ctx.save();
   ctx.beginPath();
   ctx.rect(0, 0, w, h);
   ctx.clip();
 
-  const { scale, ox, oy } = computeFit(w, h, US_CONTIGUOUS_BOUNDS);
+  const { scale, ox, oy } = computeFit(w, h, bounds);
 
   ctx.lineJoin = "round";
   ctx.lineCap = "round";
@@ -1000,15 +1017,14 @@ function buildPositionsView() {
 }
 
 function buildMapView() {
-  // List on the left, two map images on the right: a big contiguous-48 image
-  // on top and an Alaska inset below it.
-  // List:        x=20..280 (w=260), y=44..244 (h=200) — center y=144.
-  // Contiguous:  x=288..576 (w=288), y=72..216 (h=144) — center y=144.
-  //              All states (incl. Florida + South Texas + Keys) visible;
-  //              source aspect 1.58 height-binds the scale, so the map
-  //              renders ~227 px wide inside the 288-wide container
-  //              (letterboxed black on each side — acceptable trade-off).
-  // Alaska:      x=292..412 (w=120), y=222..286 (h=64) — below contiguous.
+  // List on the left, three map images on the right:
+  //   - Contiguous top half: x=288..576 (w=288), y=44..135 (h=91)
+  //   - Contiguous bottom half: x=288..576 (w=288), y=135..226 (h=91)
+  //     The two halves sit flush against each other so the map reads as one
+  //     288×182 image — ~60 % more visible pixels than a single 288×144
+  //     container (the SDK's per-image height cap).
+  //   - Alaska inset: x=292..402 (w=110), y=230..288 (h=58) — below.
+  // List:    x=20..280 (w=260), y=44..244 (h=200).
   const list = new TextContainerProperty({
     xPosition: 20,
     yPosition: 44,
@@ -1019,24 +1035,32 @@ function buildMapView() {
     content: buildListContent(new Date(), { compact: true }),
     isEventCapture: 1,
   });
-  const contigMap = new ImageContainerProperty({
+  const contigTop = new ImageContainerProperty({
     xPosition: 288,
-    yPosition: 72,
-    width: CONTIG_MAP_W,
-    height: CONTIG_MAP_H,
-    containerID: CONTIG_MAP_ID,
-    containerName: CONTIG_MAP_NAME,
+    yPosition: 44,
+    width: CONTIG_HALF_W,
+    height: CONTIG_HALF_H,
+    containerID: CONTIG_TOP_ID,
+    containerName: CONTIG_TOP_NAME,
+  });
+  const contigBottom = new ImageContainerProperty({
+    xPosition: 288,
+    yPosition: 44 + CONTIG_HALF_H,
+    width: CONTIG_HALF_W,
+    height: CONTIG_HALF_H,
+    containerID: CONTIG_BOTTOM_ID,
+    containerName: CONTIG_BOTTOM_NAME,
   });
   const alaskaMap = new ImageContainerProperty({
     xPosition: 292,
-    yPosition: 222,
+    yPosition: 230,
     width: ALASKA_MAP_W,
     height: ALASKA_MAP_H,
     containerID: ALASKA_MAP_ID,
     containerName: ALASKA_MAP_NAME,
   });
   const textObject = [topBannerContainer(), list];
-  const imageObject = [contigMap, alaskaMap];
+  const imageObject = [contigTop, contigBottom, alaskaMap];
   return {
     containerTotalNum: textObject.length + imageObject.length,
     textObject,
@@ -1196,21 +1220,30 @@ async function canvasToBytes(canvas: HTMLCanvasElement): Promise<number[]> {
 }
 
 async function sendMapImages(bridge: Bridge): Promise<ImageRawDataUpdateResult> {
-  // Two images sent SERIALLY — the SDK warns against concurrent
-  // updateImageRawData calls.
-  const contig = document.createElement("canvas");
-  contig.width = CONTIG_MAP_W;
-  contig.height = CONTIG_MAP_H;
-  const cctx = contig.getContext("2d");
-  if (!cctx) throw new Error("no 2d context");
-  drawContiguousMap(cctx, CONTIG_MAP_W, CONTIG_MAP_H);
+  // Three images sent SERIALLY — the SDK warns against concurrent
+  // updateImageRawData calls. Contiguous top + bottom halves stack to form
+  // a single 288×182 visual map; Alaska is its own inset below.
+  const drawTo = (
+    w: number,
+    h: number,
+    draw: (ctx: CanvasRenderingContext2D, w: number, h: number) => void,
+  ): HTMLCanvasElement => {
+    const c = document.createElement("canvas");
+    c.width = w;
+    c.height = h;
+    const ctx = c.getContext("2d");
+    if (!ctx) throw new Error("no 2d context");
+    draw(ctx, w, h);
+    return c;
+  };
 
-  const alaska = document.createElement("canvas");
-  alaska.width = ALASKA_MAP_W;
-  alaska.height = ALASKA_MAP_H;
-  const actx = alaska.getContext("2d");
-  if (!actx) throw new Error("no 2d context");
-  drawAlaskaInset(actx, ALASKA_MAP_W, ALASKA_MAP_H);
+  const top = drawTo(CONTIG_HALF_W, CONTIG_HALF_H, (ctx, w, h) =>
+    drawContiguousMap(ctx, w, h, CONTIG_TOP_BOUNDS),
+  );
+  const bot = drawTo(CONTIG_HALF_W, CONTIG_HALF_H, (ctx, w, h) =>
+    drawContiguousMap(ctx, w, h, CONTIG_BOTTOM_BOUNDS),
+  );
+  const ak = drawTo(ALASKA_MAP_W, ALASKA_MAP_H, drawAlaskaInset);
 
   // Repaint the phone preview to match.
   if (mapEl) {
@@ -1218,24 +1251,26 @@ async function sendMapImages(bridge: Bridge): Promise<ImageRawDataUpdateResult> 
     if (pctx) drawPhoneMapPreview(pctx, mapEl.width, mapEl.height);
   }
 
-  const contigBytes = await canvasToBytes(contig);
-  const contigResult = await bridge.updateImageRawData(
-    new ImageRawDataUpdate({
-      containerID: CONTIG_MAP_ID,
-      containerName: CONTIG_MAP_NAME,
-      imageData: contigBytes,
-    }),
-  );
-  if (contigResult !== ImageRawDataUpdateResult.success) return contigResult;
+  const send = async (
+    canvas: HTMLCanvasElement,
+    id: number,
+    name: string,
+  ): Promise<ImageRawDataUpdateResult> => {
+    const bytes = await canvasToBytes(canvas);
+    return await bridge.updateImageRawData(
+      new ImageRawDataUpdate({
+        containerID: id,
+        containerName: name,
+        imageData: bytes,
+      }),
+    );
+  };
 
-  const alaskaBytes = await canvasToBytes(alaska);
-  return await bridge.updateImageRawData(
-    new ImageRawDataUpdate({
-      containerID: ALASKA_MAP_ID,
-      containerName: ALASKA_MAP_NAME,
-      imageData: alaskaBytes,
-    }),
-  );
+  const r1 = await send(top, CONTIG_TOP_ID, CONTIG_TOP_NAME);
+  if (r1 !== ImageRawDataUpdateResult.success) return r1;
+  const r2 = await send(bot, CONTIG_BOTTOM_ID, CONTIG_BOTTOM_NAME);
+  if (r2 !== ImageRawDataUpdateResult.success) return r2;
+  return await send(ak, ALASKA_MAP_ID, ALASKA_MAP_NAME);
 }
 
 function delayUntilNextMinute(): number {
