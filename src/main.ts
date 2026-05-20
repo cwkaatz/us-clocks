@@ -611,13 +611,16 @@ function buildListContent(
   const timeColWidth = settings.timeFormat === "12h" ? 12 : 9; // "Mon HH:MM AM" vs "Mon HH:MM"
 
   function row(label: string, tz: string, isLocal: boolean): string {
-    const dayTime = formatDayTime(isLocal ? null : tz, when).padEnd(timeColWidth);
+    // Local row is blank — local time is in the top banner. Single space
+    // keeps the row from collapsing in LVGL / monospace <pre>.
+    if (isLocal) return " ";
+    const dayTime = formatDayTime(tz, when).padEnd(timeColWidth);
     const glyph = statusGlyph(tz, when);
     if (compact) {
       return `${label.padEnd(widest)}  ${dayTime}`;
     }
     const abbr = getZoneAbbr(tz, when).padEnd(4);
-    const offset = isLocal ? "     " : formatOffsetVsLocal(tz, when).padEnd(5);
+    const offset = formatOffsetVsLocal(tz, when).padEnd(5);
     return `${label.padEnd(widest)}  ${abbr}  ${dayTime}  ${offset}  ${glyph}`;
   }
 
@@ -768,8 +771,10 @@ const BANNER_ID = 50;
 const BANNER_NAME = "banner";
 const DST_BANNER_WINDOW_DAYS = 14;
 
-// Banner shows today's date always. When the next US DST transition is within
-// the notification window, the countdown is appended after a separator.
+// Banner shows today's date + the device's current local time. When the next
+// US DST transition is within the notification window, the countdown is
+// appended after a separator. The local time here lets us blank out the
+// "Local" row in every list view (saves space, less repetition).
 function topBannerText(now: Date): string {
   const dateStr = now.toLocaleDateString("en-US", {
     weekday: "short",
@@ -777,11 +782,17 @@ function topBannerText(now: Date): string {
     day: "numeric",
     year: "numeric",
   });
+  const timeStr = now.toLocaleTimeString("en-US", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: settings.timeFormat === "12h",
+  });
+  const base = `${dateStr}, ${timeStr}`;
   const next = nextDstTransition(now);
   const dayMs = 86_400_000;
   const daysUntil = Math.ceil((next.date.getTime() - now.getTime()) / dayMs);
-  if (daysUntil <= 0 || daysUntil > DST_BANNER_WINDOW_DAYS) return dateStr;
-  return `${dateStr}  ·  DST ${next.type} in ${daysUntil}d`;
+  if (daysUntil <= 0 || daysUntil > DST_BANNER_WINDOW_DAYS) return base;
+  return `${base}  ·  DST ${next.type} in ${daysUntil}d`;
 }
 
 function topBannerContainer(): TextContainerProperty {
@@ -875,11 +886,15 @@ function buildColumnViewParts(zones: Zone[], when: Date = new Date()): {
   offsets: string;
   glyphs: string;
 } {
-  const labels = [LOCAL_LABEL, ...zones.map((z) => z.label)].join("\n");
-  const abbrs: string[] = [getZoneAbbr(LOCAL_TZ, when)];
-  const times: string[] = [formatDayTime(null, when)];
-  const offsets: string[] = [""]; // Local is the reference — no offset.
-  const glyphs: string[] = [statusGlyph(LOCAL_TZ, when)];
+  // Local row is blank — local time lives in the top banner now. The blank
+  // line still occupies a row in the column layout so the other zones don't
+  // shift up (intentional per UX call: cleaner negative space at the top).
+  // Use a single space so LVGL doesn't collapse an empty leading line.
+  const labels = [" ", ...zones.map((z) => z.label)].join("\n");
+  const abbrs: string[] = [" "];
+  const times: string[] = [" "];
+  const offsets: string[] = [" "];
+  const glyphs: string[] = [" "];
   for (const z of zones) {
     abbrs.push(getZoneAbbr(z.tz, when));
     times.push(formatDayTime(z.tz, when));
@@ -1417,11 +1432,13 @@ function wireSettingsUi(): void {
       try {
         const bridge = currentBridge;
         const cv = VIEWS[currentViewIndex];
-        if (bridge && (cv === "column" || cv === "world")) {
-          // Column/world layout shifts with format — rebuild the page.
+        if (bridge) {
+          // Banner width and column-layout both depend on the time format,
+          // so a flip needs a full page rebuild on every view.
           await applyPage(bridge, buildView(cv));
-        } else {
-          await refreshCurrentView();
+          if (cv === "map") {
+            try { await sendMapImages(bridge); } catch { /* ignore */ }
+          }
         }
       } catch {
         /* ignore — minute tick will retry */
