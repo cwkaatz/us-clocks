@@ -288,10 +288,11 @@ function sunriseSunset(
   };
 }
 
-// Lens map image dimensions. Bumped 40% vs v0.12 (200×100) so the state
-// boundaries have room to read clearly on the lens.
-const MAP_W = 280;
-const MAP_H = 140;
+// Lens map image dimensions. h=144 is the SDK's image height cap; w chosen
+// to match the source's natural Albers-USA aspect (≈1.71) so the map fills
+// its container with no internal letterboxing.
+const MAP_W = 246;
+const MAP_H = 144;
 const MAP_CONTAINER_ID = 100;
 const MAP_CONTAINER_NAME = "map";
 
@@ -686,10 +687,11 @@ function drawUsMap(ctx: CanvasRenderingContext2D, w: number, h: number): void {
   strokePolylines(ctx, US_TZ_BORDER_POLYLINES, ox, oy, scale);
   ctx.restore();
 
-  // Layer 3: outer outline on top — solid, brightest, full glow.
+  // Layer 3: outer outline on top — same line weight + glow as TZ borders
+  // so it doesn't dominate; visual distinction is location, not thickness.
   ctx.save();
-  ctx.lineWidth = Math.max(1, w / 400);
-  ctx.shadowBlur = Math.max(2, w / 120);
+  ctx.lineWidth = Math.max(1, w / 500);
+  ctx.shadowBlur = Math.max(1.5, w / 200);
   ctx.setLineDash([]);
   strokePolylines(ctx, US_OUTLINE_POLYLINES, ox, oy, scale);
   ctx.restore();
@@ -720,15 +722,25 @@ function topBannerText(now: Date): string {
 }
 
 function topBannerContainer(): TextContainerProperty {
+  // The SDK's TextContainerProperty has no text-align field — text is always
+  // left-aligned inside its container. To centre the banner text on the
+  // 576-wide canvas we centre the CONTAINER itself, sized just-enough for the
+  // text. LVGL on the G2 averages ~11 px per char; we err slightly wide to
+  // avoid the text wrapping if the font is fractionally heavier than that.
+  const text = topBannerText(new Date());
+  const charW = 11;
+  const textW = text.length * charW;
+  const containerW = Math.min(540, textW + 16);
+  const x = Math.max(8, Math.floor((576 - textW) / 2));
   // h=30 (not 22) so descenders (y in May, g in August) render in-frame.
   return new TextContainerProperty({
-    xPosition: 30,
+    xPosition: x,
     yPosition: 4,
-    width: 516,
+    width: containerW,
     height: 30,
     containerID: BANNER_ID,
     containerName: BANNER_NAME,
-    content: topBannerText(new Date()),
+    content: text,
     isEventCapture: 0,
   });
 }
@@ -910,12 +922,14 @@ function buildPositionsView() {
 }
 
 function buildMapView() {
-  // List on the left, map on the right. Both vertically centered around y=150.
-  // Map: y=80..220 (center y=150) at 280×140.
-  // List: y=50..250 at 260×200 (center y=150).
+  // List on the left, map on the right. List takes the left ~half; the map
+  // is centered in the right ~half. Both span the same vertical band so they
+  // read as a single composition.
+  // List:  x=20..280 (w=260), y=44..244 (h=200) — center y=144.
+  // Map:   x=305..551 (w=246), y=72..216 (h=144) — center y=144.
   const list = new TextContainerProperty({
     xPosition: 20,
-    yPosition: 50,
+    yPosition: 44,
     width: 260,
     height: 200,
     containerID: 1,
@@ -924,8 +938,8 @@ function buildMapView() {
     isEventCapture: 1,
   });
   const map = new ImageContainerProperty({
-    xPosition: 290,
-    yPosition: 80,
+    xPosition: 305,
+    yPosition: 72,
     width: MAP_W,
     height: MAP_H,
     containerID: MAP_CONTAINER_ID,
