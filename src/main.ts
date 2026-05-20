@@ -12,7 +12,8 @@ import {
 } from "@evenrealities/even_hub_sdk";
 import {
   US_OUTLINE_POLYLINES,
-  US_STATE_BORDER_POLYLINES,
+  US_INTRA_ZONE_BORDER_POLYLINES,
+  US_TZ_BORDER_POLYLINES,
   US_OUTLINE_BOUNDS,
 } from "./us-outline";
 
@@ -287,8 +288,10 @@ function sunriseSunset(
   };
 }
 
-const MAP_W = 200;
-const MAP_H = 100;
+// Lens map image dimensions. Bumped 40% vs v0.12 (200×100) so the state
+// boundaries have room to read clearly on the lens.
+const MAP_W = 280;
+const MAP_H = 140;
 const MAP_CONTAINER_ID = 100;
 const MAP_CONTAINER_NAME = "map";
 
@@ -623,6 +626,29 @@ function renderPhone(): void {
 
 const MAP_STROKE = "#22ff66";
 
+type Polylines = ReadonlyArray<ReadonlyArray<readonly [number, number]>>;
+
+function strokePolylines(
+  ctx: CanvasRenderingContext2D,
+  lines: Polylines,
+  ox: number,
+  oy: number,
+  scale: number,
+): void {
+  for (const line of lines) {
+    if (line.length < 2) continue;
+    ctx.beginPath();
+    for (let i = 0; i < line.length; i++) {
+      const [px, py] = line[i];
+      const x = ox + px * scale;
+      const y = oy + py * scale;
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+  }
+}
+
 function drawUsMap(ctx: CanvasRenderingContext2D, w: number, h: number): void {
   ctx.fillStyle = "black";
   ctx.fillRect(0, 0, w, h);
@@ -634,54 +660,38 @@ function drawUsMap(ctx: CanvasRenderingContext2D, w: number, h: number): void {
   const ox = (w - srcW * scale) / 2 - minX * scale;
   const oy = (h - srcH * scale) / 2 - minY * scale;
 
-  const outlineWidth = Math.max(1, w / 400);
-  const borderWidth = Math.max(0.5, w / 800);
-  const outlineGlow = Math.max(2, w / 120);
-  const borderGlow = Math.max(1, w / 300);
-  const borderDash = Math.max(1.5, w / 200);
-
   ctx.lineJoin = "round";
   ctx.lineCap = "round";
   ctx.strokeStyle = MAP_STROKE;
-
-  // State borders first — dotted, thinner, less glow. Drawn underneath so the
-  // outer outline paints over them cleanly along the coast/border.
-  ctx.save();
-  ctx.lineWidth = borderWidth;
-  ctx.setLineDash([borderDash, borderDash * 2]);
   ctx.shadowColor = MAP_STROKE;
-  ctx.shadowBlur = borderGlow;
-  for (const line of US_STATE_BORDER_POLYLINES) {
-    if (line.length < 2) continue;
-    ctx.beginPath();
-    for (let i = 0; i < line.length; i++) {
-      const [px, py] = line[i];
-      const x = ox + px * scale;
-      const y = oy + py * scale;
-      if (i === 0) ctx.moveTo(x, y);
-      else ctx.lineTo(x, y);
-    }
-    ctx.stroke();
-  }
+
+  // Layer 1: intra-zone state borders — sparse dots, thin, minimal glow.
+  // The dot pattern is shorter dashes with longer gaps so individual states
+  // are SUGGESTED, not fully outlined.
+  ctx.save();
+  ctx.lineWidth = Math.max(0.5, w / 800);
+  ctx.shadowBlur = Math.max(0.5, w / 400);
+  const dotLen = Math.max(1, w / 400);
+  ctx.setLineDash([dotLen, dotLen * 4]); // 4x gap : dash → sparse
+  strokePolylines(ctx, US_INTRA_ZONE_BORDER_POLYLINES, ox, oy, scale);
   ctx.restore();
 
-  // Outer outline on top — solid, bright, glowy.
+  // Layer 2: time-zone borders — solid, slightly thinner than the outer
+  // outline, moderate glow. Follows the actual state borders that divide
+  // zones, so visually accurate (no straight-line approximations).
   ctx.save();
-  ctx.lineWidth = outlineWidth;
-  ctx.shadowColor = MAP_STROKE;
-  ctx.shadowBlur = outlineGlow;
-  for (const line of US_OUTLINE_POLYLINES) {
-    if (line.length < 2) continue;
-    ctx.beginPath();
-    for (let i = 0; i < line.length; i++) {
-      const [px, py] = line[i];
-      const x = ox + px * scale;
-      const y = oy + py * scale;
-      if (i === 0) ctx.moveTo(x, y);
-      else ctx.lineTo(x, y);
-    }
-    ctx.stroke();
-  }
+  ctx.lineWidth = Math.max(1, w / 500);
+  ctx.shadowBlur = Math.max(1.5, w / 200);
+  ctx.setLineDash([]);
+  strokePolylines(ctx, US_TZ_BORDER_POLYLINES, ox, oy, scale);
+  ctx.restore();
+
+  // Layer 3: outer outline on top — solid, brightest, full glow.
+  ctx.save();
+  ctx.lineWidth = Math.max(1, w / 400);
+  ctx.shadowBlur = Math.max(2, w / 120);
+  ctx.setLineDash([]);
+  strokePolylines(ctx, US_OUTLINE_POLYLINES, ox, oy, scale);
   ctx.restore();
 
   ctx.shadowBlur = 0;
@@ -900,11 +910,9 @@ function buildPositionsView() {
 }
 
 function buildMapView() {
-  // List on the left, image (map) on the right. List is vertically centered
-  // with the map so they read as a single composition.
-  // Map: y=94..194 (center y=144).
-  // List: 6 rows, ~28 px each ≈ 170 px tall. Place y so center matches map
-  // center as closely as possible (60 + 85 = 145).
+  // List on the left, map on the right. Both vertically centered around y=150.
+  // Map: y=80..220 (center y=150) at 280×140.
+  // List: y=50..250 at 260×200 (center y=150).
   const list = new TextContainerProperty({
     xPosition: 20,
     yPosition: 50,
@@ -916,8 +924,8 @@ function buildMapView() {
     isEventCapture: 1,
   });
   const map = new ImageContainerProperty({
-    xPosition: 320,
-    yPosition: 94,
+    xPosition: 290,
+    yPosition: 80,
     width: MAP_W,
     height: MAP_H,
     containerID: MAP_CONTAINER_ID,
