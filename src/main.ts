@@ -1387,24 +1387,29 @@ async function canvasToBytes(canvas: HTMLCanvasElement): Promise<number[]> {
 let mapImagesBytesCache: { contig: number[]; ak: number[] } | null = null;
 async function ensureMapImagesBytes(): Promise<{ contig: number[]; ak: number[] }> {
   if (mapImagesBytesCache) return mapImagesBytesCache;
-  const drawTo = (
+  // Render at half-resolution: canvas is W/2 × H/2, but ctx.scale(0.5)
+  // makes the existing drawing code (which uses lens coords) compress into
+  // the smaller physical pixels. The container size on the lens stays
+  // 288×144, so the SDK has to upscale 2× on display. PNG ends up encoding
+  // 1/4 the pixel count.
+  const drawToHalf = (
     w: number,
     h: number,
     draw: (ctx: CanvasRenderingContext2D, w: number, h: number) => void,
   ): HTMLCanvasElement => {
     const c = document.createElement("canvas");
-    c.width = w;
-    c.height = h;
+    c.width = Math.floor(w / 2);
+    c.height = Math.floor(h / 2);
     const ctx = c.getContext("2d");
     if (!ctx) throw new Error("no 2d context");
+    ctx.scale(0.5, 0.5);
     draw(ctx, w, h);
-    applyCheckerboard(ctx, w, h);
     return c;
   };
-  const contigC = drawTo(CONTIG_MAP_W, CONTIG_MAP_H, (ctx, w, h) =>
+  const contigC = drawToHalf(CONTIG_MAP_W, CONTIG_MAP_H, (ctx, w, h) =>
     drawContiguousMap(ctx, w, h),
   );
-  const akC = drawTo(ALASKA_MAP_W, ALASKA_MAP_H, drawAlaskaInset);
+  const akC = drawToHalf(ALASKA_MAP_W, ALASKA_MAP_H, drawAlaskaInset);
   const [contig, ak] = await Promise.all([
     canvasToBytes(contigC),
     canvasToBytes(akC),
@@ -1468,14 +1473,16 @@ async function sendPositionsBackground(
   const when = new Date();
 
   const pending = POS_BG_TILES.map(async (tile, i) => {
+    // Half-resolution tile (144×72 instead of 288×144) — the SDK upscales
+    // 2× on display. Drops the per-tile pixel count from 41 472 to 10 368.
     const c = document.createElement("canvas");
-    c.width = POS_BG_TILE_W;
-    c.height = POS_BG_TILE_H;
+    c.width = Math.floor(POS_BG_TILE_W / 2);
+    c.height = Math.floor(POS_BG_TILE_H / 2);
     const ctx = c.getContext("2d");
     if (!ctx) throw new Error("no 2d context");
-    ctx.drawImage(statics[i], 0, 0);
+    ctx.scale(0.5, 0.5);
+    ctx.drawImage(statics[i], 0, 0, POS_BG_TILE_W, POS_BG_TILE_H);
     drawPositionsBgTileLabels(ctx, tile.x, tile.y, when);
-    applyCheckerboard(ctx, POS_BG_TILE_W, POS_BG_TILE_H);
     const bytes = await canvasToBytes(c);
     return { bytes, tile };
   });
