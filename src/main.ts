@@ -786,17 +786,21 @@ function drawAlaskaInset(ctx: CanvasRenderingContext2D, w: number, h: number): v
 }
 
 // Positions-view background tile. The full virtual canvas is 576×288, and
-// we render one tile of that into the given (tileX, tileY) position. The
-// contiguous outline is drawn as a single thin dotted line with NO glow and
-// NO state borders — only the outer outline plus TZ-boundary lines (which
-// also follow real state borders, so they still read as geographic). The
-// canvas auto-clips content outside the tile's bounds.
+// we render one tile of that into the given (tileX, tileY) position.
+//
+// Banner text and zone labels are BAKED into each tile via canvas fillText
+// because the SDK paints image containers on top of text containers (PB
+// order: List → Text → Image). The "text container overlay" pattern that
+// works on every other view doesn't work here, where image tiles cover the
+// full canvas. Each tile draws every label / the banner with appropriate
+// offset; canvas-clip handles content outside the tile.
 function drawPositionsBgTile(
   ctx: CanvasRenderingContext2D,
   tileW: number,
   tileH: number,
   tileX: number,
   tileY: number,
+  when: Date = new Date(),
 ): void {
   const LENS_W = 576;
   const LENS_H = 288;
@@ -815,6 +819,7 @@ function drawPositionsBgTile(
   ctx.rect(0, 0, tileW, tileH);
   ctx.clip();
 
+  // --- Map outline + TZ borders ---
   ctx.lineJoin = "round";
   ctx.lineCap = "round";
   ctx.strokeStyle = MAP_STROKE;
@@ -826,6 +831,25 @@ function drawPositionsBgTile(
   const oy = globalOy - tileY;
   strokePolylines(ctx, US_CONTIGUOUS_OUTLINE_POLYLINES, ox, oy, scale);
   strokePolylines(ctx, US_TZ_BORDER_POLYLINES, ox, oy, scale);
+
+  // --- Banner (baked in: this tile draws whatever portion of the banner
+  //     falls within its bounds; canvas-clip handles the rest) ---
+  ctx.fillStyle = MAP_STROKE;
+  ctx.setLineDash([]);
+  ctx.textBaseline = "top";
+  ctx.font = "bold 20px Helvetica, Arial, sans-serif";
+  const bannerStr = topBannerText(when);
+  const bannerWidth = ctx.measureText(bannerStr).width;
+  const bannerLensX = (LENS_W - bannerWidth) / 2;
+  const bannerLensY = 8;
+  ctx.fillText(bannerStr, bannerLensX - tileX, bannerLensY - tileY);
+
+  // --- Zone labels ---
+  ctx.font = "bold 22px Helvetica, Arial, sans-serif";
+  for (const p of POSITIONS_LAYOUT) {
+    const content = positionsTimeContent(p.abbr, p.tz, when);
+    ctx.fillText(content, p.xPosition - tileX, p.yPosition - tileY);
+  }
 
   ctx.restore();
 }
@@ -1074,9 +1098,12 @@ function positionsTimeContent(abbr: string, tz: string, when: Date = new Date())
 
 function buildPositionsView() {
   // Full-canvas US-map background drawn as a 2×2 grid of image containers.
-  // Each tile renders the SAME global projection but offset for its quadrant
-  // (canvas auto-clips the off-tile content). Layered above are the banner
-  // and one transparent text label per continental zone.
+  // Banner text and zone labels are BAKED INTO the bg tiles — the SDK paints
+  // images on top of text, so the obvious "text overlay" pattern is hidden
+  // by the full-screen image. See drawPositionsBgTile.
+  //
+  // A single 1×1 transparent text container is included only to satisfy the
+  // input-event capture requirement (images can't capture events).
   const bgImages = POS_BG_TILES.map((tile) =>
     new ImageContainerProperty({
       xPosition: tile.x,
@@ -1087,19 +1114,17 @@ function buildPositionsView() {
       containerName: tile.name,
     }),
   );
-  const labels = POSITIONS_LAYOUT.map((p, i) =>
-    new TextContainerProperty({
-      xPosition: p.xPosition,
-      yPosition: p.yPosition,
-      width: 130,
-      height: 32,
-      containerID: i + 1,
-      containerName: `pos-${i + 1}`,
-      content: positionsTimeContent(p.abbr, p.tz),
-      isEventCapture: i === 0 ? 1 : 0,
-    }),
-  );
-  const textObject = [topBannerContainer(), ...labels];
+  const evtCapture = new TextContainerProperty({
+    xPosition: 0,
+    yPosition: 0,
+    width: 1,
+    height: 1,
+    containerID: 1,
+    containerName: "evt",
+    content: " ",
+    isEventCapture: 1,
+  });
+  const textObject = [evtCapture];
   const imageObject = bgImages;
   return {
     containerTotalNum: textObject.length + imageObject.length,
@@ -1287,23 +1312,6 @@ async function pushColumnContainers(
   }
 }
 
-async function pushPositionContainers(bridge: Bridge): Promise<void> {
-  const now = new Date();
-  // Serialize — SDK docs warn against concurrent sends.
-  for (let i = 0; i < POSITIONS_LAYOUT.length; i++) {
-    const p = POSITIONS_LAYOUT[i];
-    await bridge.textContainerUpgrade(
-      new TextContainerUpgrade({
-        containerID: i + 1,
-        containerName: `pos-${i + 1}`,
-        contentOffset: 0,
-        contentLength: 0,
-        content: positionsTimeContent(p.abbr, p.tz, now),
-      }),
-    );
-  }
-}
-
 async function canvasToBytes(canvas: HTMLCanvasElement): Promise<number[]> {
   const blob = await new Promise<Blob | null>((resolve) =>
     canvas.toBlob((b) => resolve(b), "image/png"),
@@ -1420,8 +1428,13 @@ async function refreshCurrentView(): Promise<void> {
   const bridge = currentBridge;
   if (!bridge) return;
   const view = VIEWS[currentViewIndex];
-  if (view === "positions") await pushPositionContainers(bridge);
-  else if (view === "column") await pushColumnContainers(bridge, ZONES, true);
+  if (view === "positions") {
+    // Banner + zone labels are baked into the bg tiles; resend the lot.
+    // Skip pushTopBanner (no banner text container on this view).
+    await sendPositionsBackground(bridge);
+    return;
+  }
+  if (view === "column") await pushColumnContainers(bridge, ZONES, true);
   else if (view === "world") await pushColumnContainers(bridge, currentWorldZones(), false);
   else await pushListContainer(bridge, { compact: true }); // map view
   await pushTopBanner(bridge);
