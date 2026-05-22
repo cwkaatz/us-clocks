@@ -327,12 +327,13 @@ const POS_BG_TILES: ReadonlyArray<{ x: number; y: number; id: number; name: stri
 
 // Four continental US zones with vertically-staggered label positions so the
 // adjacent labels (which are wider than their 80-px zone bands on the lens)
-// don't overlap each other.
+// don't overlap each other. ET pulled up off the horizontal line that
+// passes through the eastern states at mid-canvas y.
 const POSITIONS_LAYOUT: ReadonlyArray<{ abbr: string; tz: string; xPosition: number; yPosition: number }> = [
   { abbr: "PT", tz: "America/Los_Angeles", xPosition: 55,  yPosition: 145 },
   { abbr: "MT", tz: "America/Denver",       xPosition: 164, yPosition: 110 },
   { abbr: "CT", tz: "America/Chicago",      xPosition: 246, yPosition: 180 },
-  { abbr: "ET", tz: "America/New_York",     xPosition: 368, yPosition: 145 },
+  { abbr: "ET", tz: "America/New_York",     xPosition: 368, yPosition: 115 },
 ];
 
 const statusEl = document.getElementById("status") as HTMLParagraphElement;
@@ -804,12 +805,16 @@ function drawPositionsBgTile(
 ): void {
   const LENS_W = 576;
   const LENS_H = 288;
+  // Map occupies y=POS_MAP_TOP_Y..LENS_H so the banner at the top of the
+  // canvas doesn't overlap the northern edge of the US shape.
+  const POS_MAP_TOP_Y = 30;
+  const POS_MAP_H = LENS_H - POS_MAP_TOP_Y; // 258
   const { minX, maxX, minY, maxY } = US_CONTIGUOUS_BOUNDS;
   const srcW = maxX - minX;
   const srcH = maxY - minY;
-  const scale = Math.min(LENS_W / srcW, LENS_H / srcH);
+  const scale = Math.min(LENS_W / srcW, POS_MAP_H / srcH);
   const globalOx = (LENS_W - srcW * scale) / 2 - minX * scale;
-  const globalOy = (LENS_H - srcH * scale) / 2 - minY * scale;
+  const globalOy = POS_MAP_TOP_Y + (POS_MAP_H - srcH * scale) / 2 - minY * scale;
 
   ctx.fillStyle = "black";
   ctx.fillRect(0, 0, tileW, tileH);
@@ -846,7 +851,7 @@ function drawPositionsBgTile(
   ctx.fillStyle = MAP_STROKE;
   ctx.setLineDash([]);
   ctx.textBaseline = "top";
-  ctx.font = "bold 20px Helvetica, Arial, sans-serif";
+  ctx.font = "20px Helvetica, Arial, sans-serif";
   const bannerStr = topBannerText(when);
   const bannerWidth = ctx.measureText(bannerStr).width;
   const bannerLensX = (LENS_W - bannerWidth) / 2;
@@ -854,7 +859,7 @@ function drawPositionsBgTile(
   ctx.fillText(bannerStr, bannerLensX - tileX, bannerLensY - tileY);
 
   // --- Zone labels ---
-  ctx.font = "bold 22px Helvetica, Arial, sans-serif";
+  ctx.font = "22px Helvetica, Arial, sans-serif";
   for (const p of POSITIONS_LAYOUT) {
     const content = positionsTimeContent(p.abbr, p.tz, when);
     ctx.fillText(content, p.xPosition - tileX, p.yPosition - tileY);
