@@ -290,11 +290,9 @@ function sunriseSunset(
   };
 }
 
-// Map view's contiguous-US image. We use a single 288×144 container instead
-// of the v0.15.1 vertical stack. The stack escaped the SDK's per-image
-// height cap and gave us ~60 % more pixels (288×182 visible vs 227×144),
-// but per-image cost on the lens is ~17 K pixels/sec — so the second tile
-// adds ~1.5 s of perceived load time. Going back to one tile cuts that.
+// Map view's contiguous-US image — single 288×144 container. (SDK image
+// cap is 288×144; the lens displays at ~17 K pixels/s, so each tile adds
+// ~1.5 s of load time — every tile is paid for.)
 const CONTIG_MAP_W = 288;
 const CONTIG_MAP_H = 144;
 const CONTIG_MAP_ID = 100;
@@ -340,20 +338,7 @@ const factEl = document.getElementById("fact") as HTMLParagraphElement | null;
 const sunSectionEl = document.getElementById("sun-section") as HTMLElement | null;
 const sunRiseSetEl = document.getElementById("sun-rise-set") as HTMLParagraphElement | null;
 const sunDaylightEl = document.getElementById("sun-daylight") as HTMLParagraphElement | null;
-const perfStatsEl = document.getElementById("perf-stats") as HTMLParagraphElement | null;
 if (versionEl) versionEl.textContent = `v${__APP_VERSION__}`;
-
-// Rolling perf log — each view stamps its own line as it sends, so the phone
-// page shows a side-by-side comparison of Map vs Geographic timings.
-const perfLastByView = new Map<string, string>();
-function logPerf(view: string, line: string): void {
-  perfLastByView.set(view, line);
-  if (!perfStatsEl) return;
-  perfStatsEl.textContent = Array.from(perfLastByView.entries())
-    .map(([v, l]) => `${v}: ${l}`)
-    .join("\n");
-  perfStatsEl.style.whiteSpace = "pre";
-}
 
 const DST_FACTS = [
   "DST in the US starts on the second Sunday of March and ends on the first Sunday of November.",
@@ -793,20 +778,18 @@ function drawAlaskaInset(ctx: CanvasRenderingContext2D, w: number, h: number): v
   ctx.shadowBlur = 0;
 }
 
-// Positions-view background tile. The full virtual canvas is 576×288, and
-// we render one tile of that into the given (tileX, tileY) position.
+// Positions view splits each tile into a STATIC and a DYNAMIC pass.
 //
-// Banner text and zone labels are BAKED into each tile via canvas fillText
-// because the SDK paints image containers on top of text containers (PB
-// order: List → Text → Image). The "text container overlay" pattern that
-// works on every other view doesn't work here, where image tiles cover the
-// full canvas. Each tile draws every label / the banner with appropriate
-// offset; canvas-clip handles content outside the tile.
-// Static-only portion of a positions tile: black background + map outline +
-// state borders + TZ borders. Doesn't depend on `when`, so we render this
-// once into a cached HTMLCanvasElement and drawImage it back onto a fresh
-// tile canvas on every send. Saves the ~50 ms of stroking 120 polylines per
-// tile per minute.
+// The static portion (this function) is the same every minute — black bg +
+// map outline + state borders + TZ borders. We render it once into a
+// cached HTMLCanvasElement (see precachePosStaticTiles) and reuse it via
+// drawImage on every send. The dynamic overlay (banner + zone times) is
+// drawn fresh each time on top of the cached static portion.
+//
+// Why bake labels into the image at all: the SDK paints image containers on
+// top of text containers (PB order: List → Text → Image), so a text overlay
+// would be hidden by the full-canvas image. Each tile draws every label;
+// canvas-clip handles content outside the tile.
 function drawPositionsBgTileStatic(
   ctx: CanvasRenderingContext2D,
   tileW: number,
@@ -1183,8 +1166,7 @@ function buildPositionsView() {
 
 function buildMapView() {
   // List on the left, single contig-US image on the right, small Alaska
-  // inset below it. Two image containers — back to the v0.14 design,
-  // sacrificing the v0.15 vertical-stack pixel boost to halve the load time.
+  // inset below it.
   //   - List:       x=20..280 (w=260), y=44..244 (h=200).
   //   - Contiguous: x=288..576 (w=288), y=72..216 (h=144). Map renders
   //                 ~227×144 visible (source 1.58 aspect, height-bound).
@@ -1352,9 +1334,9 @@ async function pushColumnContainers(
 }
 
 // Blank every other pixel in a checkerboard pattern (x+y is odd → black).
-// Halves the number of "lit" pixels and tends to compress PNGs significantly.
-// Applied to lens tiles before encoding as an experiment in reducing the
-// pixel/byte load that hits the lens decode pipeline.
+// Roughly halves the bytes the PNG encoder has to ship, which trims a small
+// but measurable slice off the lens-side load time. Visual cost: lines and
+// text look slightly stippled on the lens.
 function applyCheckerboard(ctx: CanvasRenderingContext2D, w: number, h: number): void {
   const img = ctx.getImageData(0, 0, w, h);
   const d = img.data;
@@ -1414,9 +1396,7 @@ async function ensureMapImagesBytes(): Promise<{ contig: number[]; ak: number[] 
 }
 
 async function sendMapImages(bridge: Bridge): Promise<ImageRawDataUpdateResult> {
-  const t0 = performance.now();
   const cached = await ensureMapImagesBytes();
-  const tReady = performance.now();
 
   // Repaint the phone preview to match.
   if (mapEl) {
@@ -1428,11 +1408,9 @@ async function sendMapImages(bridge: Bridge): Promise<ImageRawDataUpdateResult> 
     [cached.contig, CONTIG_MAP_ID, CONTIG_MAP_NAME],
     [cached.ak, ALASKA_MAP_ID, ALASKA_MAP_NAME],
   ];
-  let totalBytes = 0;
   for (const [bytes, id, name] of sends) {
-    totalBytes += bytes.length;
-    // Defensive copy: pass a fresh array in case the SDK retains a reference
-    // and the second send-with-same-array confuses it.
+    // Defensive .slice() in case the SDK retains a reference and gets
+    // confused by repeat sends of the same array.
     const result = await bridge.updateImageRawData(
       new ImageRawDataUpdate({
         containerID: id,
@@ -1440,16 +1418,8 @@ async function sendMapImages(bridge: Bridge): Promise<ImageRawDataUpdateResult> 
         imageData: bytes.slice(),
       }),
     );
-    if (result !== ImageRawDataUpdateResult.success) {
-      logPerf("Map", `FAIL [${name}]: ${result}`);
-      return result;
-    }
+    if (result !== ImageRawDataUpdateResult.success) return result;
   }
-  const t1 = performance.now();
-  logPerf(
-    "Map",
-    `prep ${(tReady - t0).toFixed(0)}ms · send ${(t1 - tReady).toFixed(0)}ms · ${(totalBytes / 1024).toFixed(1)}KB`,
-  );
   return ImageRawDataUpdateResult.success;
 }
 
@@ -1463,7 +1433,6 @@ async function sendPositionsBackground(
   //      parallel, then await + send each result sequentially. The SDK
   //      forbids concurrent updateImageRawData, so sends are serial — but
   //      encoding for tiles 2-4 finishes while tile 1 is being transferred.
-  const t0 = performance.now();
   const statics = precachePosStaticTiles();
   const when = new Date();
 
@@ -1480,13 +1449,9 @@ async function sendPositionsBackground(
     return { bytes, tile };
   });
 
-  let totalBytes = 0;
-  let firstReadyAt = -1;
   for (const promise of pending) {
     const { bytes, tile } = await promise;
-    if (firstReadyAt < 0) firstReadyAt = performance.now();
-    totalBytes += bytes.length;
-    // Defensive copy in case the SDK keeps a stale reference between sends.
+    // Defensive .slice() in case the SDK retains a reference between sends.
     const result = await bridge.updateImageRawData(
       new ImageRawDataUpdate({
         containerID: tile.id,
@@ -1494,16 +1459,8 @@ async function sendPositionsBackground(
         imageData: bytes.slice(),
       }),
     );
-    if (result !== ImageRawDataUpdateResult.success) {
-      logPerf("Geo", `FAIL [${tile.name}]: ${result}`);
-      return result;
-    }
+    if (result !== ImageRawDataUpdateResult.success) return result;
   }
-  const t1 = performance.now();
-  logPerf(
-    "Geo",
-    `prep ${(firstReadyAt - t0).toFixed(0)}ms · send ${(t1 - firstReadyAt).toFixed(0)}ms · ${(totalBytes / 1024).toFixed(1)}KB`,
-  );
   return ImageRawDataUpdateResult.success;
 }
 
