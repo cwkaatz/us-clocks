@@ -1408,14 +1408,19 @@ async function sendMapImages(bridge: Bridge): Promise<ImageRawDataUpdateResult> 
   let totalBytes = 0;
   for (const [bytes, id, name] of sends) {
     totalBytes += bytes.length;
+    // Defensive copy: pass a fresh array in case the SDK retains a reference
+    // and the second send-with-same-array confuses it.
     const result = await bridge.updateImageRawData(
       new ImageRawDataUpdate({
         containerID: id,
         containerName: name,
-        imageData: bytes,
+        imageData: bytes.slice(),
       }),
     );
-    if (result !== ImageRawDataUpdateResult.success) return result;
+    if (result !== ImageRawDataUpdateResult.success) {
+      logPerf("Map", `FAIL [${name}]: ${result}`);
+      return result;
+    }
   }
   const t1 = performance.now();
   logPerf(
@@ -1457,14 +1462,18 @@ async function sendPositionsBackground(
     const { bytes, tile } = await promise;
     if (firstReadyAt < 0) firstReadyAt = performance.now();
     totalBytes += bytes.length;
+    // Defensive copy in case the SDK keeps a stale reference between sends.
     const result = await bridge.updateImageRawData(
       new ImageRawDataUpdate({
         containerID: tile.id,
         containerName: tile.name,
-        imageData: bytes,
+        imageData: bytes.slice(),
       }),
     );
-    if (result !== ImageRawDataUpdateResult.success) return result;
+    if (result !== ImageRawDataUpdateResult.success) {
+      logPerf("Geo", `FAIL [${tile.name}]: ${result}`);
+      return result;
+    }
   }
   const t1 = performance.now();
   logPerf(
