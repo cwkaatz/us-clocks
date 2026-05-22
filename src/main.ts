@@ -333,7 +333,7 @@ const POSITIONS_LAYOUT: ReadonlyArray<{ abbr: string; tz: string; xPosition: num
   { abbr: "PT", tz: "America/Los_Angeles", xPosition: 55,  yPosition: 145 },
   { abbr: "MT", tz: "America/Denver",       xPosition: 164, yPosition: 110 },
   { abbr: "CT", tz: "America/Chicago",      xPosition: 246, yPosition: 180 },
-  { abbr: "ET", tz: "America/New_York",     xPosition: 368, yPosition: 115 },
+  { abbr: "ET", tz: "America/New_York",     xPosition: 368, yPosition: 127 },
 ];
 
 const statusEl = document.getElementById("status") as HTMLParagraphElement;
