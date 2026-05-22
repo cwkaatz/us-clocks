@@ -290,21 +290,15 @@ function sunriseSunset(
   };
 }
 
-// The lens contiguous map is split into TWO 288×91 image containers stacked
-// vertically. Combined they form a 288×182 visual area — ~60 % more pixels
-// than a single 288×144 container, because two stacked containers escape the
-// SDK's per-image 144 px height cap. Each container renders its half of the
-// contiguous bounds and the canvas auto-clips anything outside.
-const CONTIG_HALF_W = 288;
-const CONTIG_HALF_H = 91;
-const CONTIG_TOP_ID = 100;
-const CONTIG_TOP_NAME = "map-top";
-const CONTIG_BOTTOM_ID = 102;
-const CONTIG_BOTTOM_NAME = "map-bot";
-const CONTIG_SPLIT_Y =
-  Math.round((US_CONTIGUOUS_BOUNDS.minY + US_CONTIGUOUS_BOUNDS.maxY) / 2);
-const CONTIG_TOP_BOUNDS = { ...US_CONTIGUOUS_BOUNDS, maxY: CONTIG_SPLIT_Y };
-const CONTIG_BOTTOM_BOUNDS = { ...US_CONTIGUOUS_BOUNDS, minY: CONTIG_SPLIT_Y };
+// Map view's contiguous-US image. We use a single 288×144 container instead
+// of the v0.15.1 vertical stack. The stack escaped the SDK's per-image
+// height cap and gave us ~60 % more pixels (288×182 visible vs 227×144),
+// but per-image cost on the lens is ~17 K pixels/sec — so the second tile
+// adds ~1.5 s of perceived load time. Going back to one tile cuts that.
+const CONTIG_MAP_W = 288;
+const CONTIG_MAP_H = 144;
+const CONTIG_MAP_ID = 100;
+const CONTIG_MAP_NAME = "map";
 // Alaska natural Albers-USA aspect ≈ 1.88 (261×139 source). 110×58 ≈ 1.90,
 // so the inset fills its container with essentially no letterboxing.
 const ALASKA_MAP_W = 110;
@@ -1188,14 +1182,13 @@ function buildPositionsView() {
 }
 
 function buildMapView() {
-  // List on the left, three map images on the right:
-  //   - Contiguous top half: x=288..576 (w=288), y=44..135 (h=91)
-  //   - Contiguous bottom half: x=288..576 (w=288), y=135..226 (h=91)
-  //     The two halves sit flush against each other so the map reads as one
-  //     288×182 image — ~60 % more visible pixels than a single 288×144
-  //     container (the SDK's per-image height cap).
-  //   - Alaska inset: x=292..402 (w=110), y=230..288 (h=58) — below.
-  // List:    x=20..280 (w=260), y=44..244 (h=200).
+  // List on the left, single contig-US image on the right, small Alaska
+  // inset below it. Two image containers — back to the v0.14 design,
+  // sacrificing the v0.15 vertical-stack pixel boost to halve the load time.
+  //   - List:       x=20..280 (w=260), y=44..244 (h=200).
+  //   - Contiguous: x=288..576 (w=288), y=72..216 (h=144). Map renders
+  //                 ~227×144 visible (source 1.58 aspect, height-bound).
+  //   - Alaska:     x=292..402 (w=110), y=224..282 (h=58).
   const list = new TextContainerProperty({
     xPosition: 20,
     yPosition: 44,
@@ -1206,32 +1199,24 @@ function buildMapView() {
     content: buildListContent(new Date(), { compact: true }),
     isEventCapture: 1,
   });
-  const contigTop = new ImageContainerProperty({
+  const contigMap = new ImageContainerProperty({
     xPosition: 288,
-    yPosition: 44,
-    width: CONTIG_HALF_W,
-    height: CONTIG_HALF_H,
-    containerID: CONTIG_TOP_ID,
-    containerName: CONTIG_TOP_NAME,
-  });
-  const contigBottom = new ImageContainerProperty({
-    xPosition: 288,
-    yPosition: 44 + CONTIG_HALF_H,
-    width: CONTIG_HALF_W,
-    height: CONTIG_HALF_H,
-    containerID: CONTIG_BOTTOM_ID,
-    containerName: CONTIG_BOTTOM_NAME,
+    yPosition: 72,
+    width: CONTIG_MAP_W,
+    height: CONTIG_MAP_H,
+    containerID: CONTIG_MAP_ID,
+    containerName: CONTIG_MAP_NAME,
   });
   const alaskaMap = new ImageContainerProperty({
     xPosition: 292,
-    yPosition: 230,
+    yPosition: 224,
     width: ALASKA_MAP_W,
     height: ALASKA_MAP_H,
     containerID: ALASKA_MAP_ID,
     containerName: ALASKA_MAP_NAME,
   });
   const textObject = [topBannerContainer(), list];
-  const imageObject = [contigTop, contigBottom, alaskaMap];
+  const imageObject = [contigMap, alaskaMap];
   return {
     containerTotalNum: textObject.length + imageObject.length,
     textObject,
@@ -1377,8 +1362,8 @@ async function canvasToBytes(canvas: HTMLCanvasElement): Promise<number[]> {
 // Map view images are 100 % static — no time-dependent content. We encode
 // once and reuse forever, so view-switches after the first only pay the
 // BT-transfer cost, not the canvas+PNG cost.
-let mapImagesBytesCache: { top: number[]; bot: number[]; ak: number[] } | null = null;
-async function ensureMapImagesBytes(): Promise<{ top: number[]; bot: number[]; ak: number[] }> {
+let mapImagesBytesCache: { contig: number[]; ak: number[] } | null = null;
+async function ensureMapImagesBytes(): Promise<{ contig: number[]; ak: number[] }> {
   if (mapImagesBytesCache) return mapImagesBytesCache;
   const drawTo = (
     w: number,
@@ -1393,19 +1378,15 @@ async function ensureMapImagesBytes(): Promise<{ top: number[]; bot: number[]; a
     draw(ctx, w, h);
     return c;
   };
-  const topC = drawTo(CONTIG_HALF_W, CONTIG_HALF_H, (ctx, w, h) =>
-    drawContiguousMap(ctx, w, h, CONTIG_TOP_BOUNDS),
-  );
-  const botC = drawTo(CONTIG_HALF_W, CONTIG_HALF_H, (ctx, w, h) =>
-    drawContiguousMap(ctx, w, h, CONTIG_BOTTOM_BOUNDS),
+  const contigC = drawTo(CONTIG_MAP_W, CONTIG_MAP_H, (ctx, w, h) =>
+    drawContiguousMap(ctx, w, h),
   );
   const akC = drawTo(ALASKA_MAP_W, ALASKA_MAP_H, drawAlaskaInset);
-  const [top, bot, ak] = await Promise.all([
-    canvasToBytes(topC),
-    canvasToBytes(botC),
+  const [contig, ak] = await Promise.all([
+    canvasToBytes(contigC),
     canvasToBytes(akC),
   ]);
-  mapImagesBytesCache = { top, bot, ak };
+  mapImagesBytesCache = { contig, ak };
   return mapImagesBytesCache;
 }
 
@@ -1421,8 +1402,7 @@ async function sendMapImages(bridge: Bridge): Promise<ImageRawDataUpdateResult> 
   }
 
   const sends: Array<[number[], number, string]> = [
-    [cached.top, CONTIG_TOP_ID, CONTIG_TOP_NAME],
-    [cached.bot, CONTIG_BOTTOM_ID, CONTIG_BOTTOM_NAME],
+    [cached.contig, CONTIG_MAP_ID, CONTIG_MAP_NAME],
     [cached.ak, ALASKA_MAP_ID, ALASKA_MAP_NAME],
   ];
   let totalBytes = 0;
