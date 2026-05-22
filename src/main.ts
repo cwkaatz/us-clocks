@@ -819,16 +819,25 @@ function drawPositionsBgTile(
   ctx.rect(0, 0, tileW, tileH);
   ctx.clip();
 
-  // --- Map outline + TZ borders ---
+  // --- Three-layer map ---
+  // 1. Intra-zone state borders: faintest — low-alpha green, sparse dotted.
+  // 2. Outer outline: solid, thin, full brightness.
+  // 3. TZ-divider borders: same solid thin style as outline.
   ctx.lineJoin = "round";
   ctx.lineCap = "round";
-  ctx.strokeStyle = MAP_STROKE;
-  ctx.shadowBlur = 0; // lightest possible — no glow on this view
-  ctx.lineWidth = 1;
-  ctx.setLineDash([1.5, 3]);
+  ctx.shadowBlur = 0;
 
   const ox = globalOx - tileX;
   const oy = globalOy - tileY;
+
+  ctx.strokeStyle = "rgba(34, 255, 102, 0.22)";
+  ctx.lineWidth = 1;
+  ctx.setLineDash([1, 5]);
+  strokePolylines(ctx, US_INTRA_ZONE_BORDER_POLYLINES, ox, oy, scale);
+
+  ctx.strokeStyle = MAP_STROKE;
+  ctx.lineWidth = 1;
+  ctx.setLineDash([]);
   strokePolylines(ctx, US_CONTIGUOUS_OUTLINE_POLYLINES, ox, oy, scale);
   strokePolylines(ctx, US_TZ_BORDER_POLYLINES, ox, oy, scale);
 
