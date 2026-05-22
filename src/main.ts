@@ -312,6 +312,29 @@ const ALASKA_MAP_H = 58;
 const ALASKA_MAP_ID = 101;
 const ALASKA_MAP_NAME = "alaska";
 
+// Positions view: full-canvas (576×288) background of the contiguous US, drawn
+// across a 2×2 grid of 288×144 image containers. Each tile renders the same
+// global projection but offset for its own quadrant; canvas-clip handles the
+// edges. IDs in 110-113 to keep them separate from the map-view image slots.
+const POS_BG_TILE_W = 288;
+const POS_BG_TILE_H = 144;
+const POS_BG_TILES: ReadonlyArray<{ x: number; y: number; id: number; name: string }> = [
+  { x: 0,   y: 0,   id: 110, name: "pos-bg-tl" },
+  { x: 288, y: 0,   id: 111, name: "pos-bg-tr" },
+  { x: 0,   y: 144, id: 112, name: "pos-bg-bl" },
+  { x: 288, y: 144, id: 113, name: "pos-bg-br" },
+];
+
+// Four continental US zones with vertically-staggered label positions so the
+// adjacent labels (which are wider than their 80-px zone bands on the lens)
+// don't overlap each other.
+const POSITIONS_LAYOUT: ReadonlyArray<{ abbr: string; tz: string; xPosition: number; yPosition: number }> = [
+  { abbr: "PT", tz: "America/Los_Angeles", xPosition: 55,  yPosition: 145 },
+  { abbr: "MT", tz: "America/Denver",       xPosition: 164, yPosition: 110 },
+  { abbr: "CT", tz: "America/Chicago",      xPosition: 246, yPosition: 180 },
+  { abbr: "ET", tz: "America/New_York",     xPosition: 368, yPosition: 145 },
+];
+
 const statusEl = document.getElementById("status") as HTMLParagraphElement;
 const clocksEl = document.getElementById("clocks") as HTMLPreElement;
 const mapEl = document.getElementById("map") as HTMLCanvasElement | null;
@@ -762,6 +785,51 @@ function drawAlaskaInset(ctx: CanvasRenderingContext2D, w: number, h: number): v
   ctx.shadowBlur = 0;
 }
 
+// Positions-view background tile. The full virtual canvas is 576×288, and
+// we render one tile of that into the given (tileX, tileY) position. The
+// contiguous outline is drawn as a single thin dotted line with NO glow and
+// NO state borders — only the outer outline plus TZ-boundary lines (which
+// also follow real state borders, so they still read as geographic). The
+// canvas auto-clips content outside the tile's bounds.
+function drawPositionsBgTile(
+  ctx: CanvasRenderingContext2D,
+  tileW: number,
+  tileH: number,
+  tileX: number,
+  tileY: number,
+): void {
+  const LENS_W = 576;
+  const LENS_H = 288;
+  const { minX, maxX, minY, maxY } = US_CONTIGUOUS_BOUNDS;
+  const srcW = maxX - minX;
+  const srcH = maxY - minY;
+  const scale = Math.min(LENS_W / srcW, LENS_H / srcH);
+  const globalOx = (LENS_W - srcW * scale) / 2 - minX * scale;
+  const globalOy = (LENS_H - srcH * scale) / 2 - minY * scale;
+
+  ctx.fillStyle = "black";
+  ctx.fillRect(0, 0, tileW, tileH);
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(0, 0, tileW, tileH);
+  ctx.clip();
+
+  ctx.lineJoin = "round";
+  ctx.lineCap = "round";
+  ctx.strokeStyle = MAP_STROKE;
+  ctx.shadowBlur = 0; // lightest possible — no glow on this view
+  ctx.lineWidth = 1;
+  ctx.setLineDash([1.5, 3]);
+
+  const ox = globalOx - tileX;
+  const oy = globalOy - tileY;
+  strokePolylines(ctx, US_CONTIGUOUS_OUTLINE_POLYLINES, ox, oy, scale);
+  strokePolylines(ctx, US_TZ_BORDER_POLYLINES, ox, oy, scale);
+
+  ctx.restore();
+}
+
 // Phone preview — single canvas showing both contiguous and Alaska in a
 // layout that mirrors the lens: contiguous fills the top ~70 %, Alaska sits
 // in the bottom-left as a small inset.
@@ -992,28 +1060,52 @@ function buildColumnView(zones: Zone[], showAbbr: boolean) {
   return { containerTotalNum: containers.length, textObject: containers };
 }
 
-function positionContent(z: Zone, when: Date = new Date()): string {
-  return `${z.abbr} ${formatDayTime(z.tz, when)}`;
+// Positions view: just abbr + time (no day) so each label fits compactly
+// over its zone region. e.g. "ET 17:20" / "ET 05:20 PM".
+function positionsTimeContent(abbr: string, tz: string, when: Date = new Date()): string {
+  const time = when.toLocaleTimeString("en-US", {
+    timeZone: tz,
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: settings.timeFormat === "12h",
+  });
+  return `${abbr} ${time}`;
 }
 
 function buildPositionsView() {
-  // One text container per zone, placed at its approximate geographic
-  // position on the 576×288 canvas. First container captures events.
-  const positions = ZONES.map(
-    (z, i) =>
-      new TextContainerProperty({
-        xPosition: z.posX,
-        yPosition: z.posY,
-        width: 150,
-        height: 32,
-        containerID: i + 1,
-        containerName: `pos-${i + 1}`,
-        content: positionContent(z),
-        isEventCapture: i === 0 ? 1 : 0,
-      }),
+  // Full-canvas US-map background drawn as a 2×2 grid of image containers.
+  // Each tile renders the SAME global projection but offset for its quadrant
+  // (canvas auto-clips the off-tile content). Layered above are the banner
+  // and one transparent text label per continental zone.
+  const bgImages = POS_BG_TILES.map((tile) =>
+    new ImageContainerProperty({
+      xPosition: tile.x,
+      yPosition: tile.y,
+      width: POS_BG_TILE_W,
+      height: POS_BG_TILE_H,
+      containerID: tile.id,
+      containerName: tile.name,
+    }),
   );
-  const textObject = [topBannerContainer(), ...positions];
-  return { containerTotalNum: textObject.length, textObject };
+  const labels = POSITIONS_LAYOUT.map((p, i) =>
+    new TextContainerProperty({
+      xPosition: p.xPosition,
+      yPosition: p.yPosition,
+      width: 130,
+      height: 32,
+      containerID: i + 1,
+      containerName: `pos-${i + 1}`,
+      content: positionsTimeContent(p.abbr, p.tz),
+      isEventCapture: i === 0 ? 1 : 0,
+    }),
+  );
+  const textObject = [topBannerContainer(), ...labels];
+  const imageObject = bgImages;
+  return {
+    containerTotalNum: textObject.length + imageObject.length,
+    textObject,
+    imageObject,
+  };
 }
 
 function buildMapView() {
@@ -1198,14 +1290,15 @@ async function pushColumnContainers(
 async function pushPositionContainers(bridge: Bridge): Promise<void> {
   const now = new Date();
   // Serialize — SDK docs warn against concurrent sends.
-  for (let i = 0; i < ZONES.length; i++) {
+  for (let i = 0; i < POSITIONS_LAYOUT.length; i++) {
+    const p = POSITIONS_LAYOUT[i];
     await bridge.textContainerUpgrade(
       new TextContainerUpgrade({
         containerID: i + 1,
         containerName: `pos-${i + 1}`,
         contentOffset: 0,
         contentLength: 0,
-        content: positionContent(ZONES[i], now),
+        content: positionsTimeContent(p.abbr, p.tz, now),
       }),
     );
   }
@@ -1271,6 +1364,31 @@ async function sendMapImages(bridge: Bridge): Promise<ImageRawDataUpdateResult> 
   const r2 = await send(bot, CONTIG_BOTTOM_ID, CONTIG_BOTTOM_NAME);
   if (r2 !== ImageRawDataUpdateResult.success) return r2;
   return await send(ak, ALASKA_MAP_ID, ALASKA_MAP_NAME);
+}
+
+async function sendPositionsBackground(
+  bridge: Bridge,
+): Promise<ImageRawDataUpdateResult> {
+  // Four image containers covering the full lens canvas, each rendering its
+  // quadrant of the contiguous US background. Serialised per SDK rules.
+  for (const tile of POS_BG_TILES) {
+    const c = document.createElement("canvas");
+    c.width = POS_BG_TILE_W;
+    c.height = POS_BG_TILE_H;
+    const ctx = c.getContext("2d");
+    if (!ctx) throw new Error("no 2d context");
+    drawPositionsBgTile(ctx, POS_BG_TILE_W, POS_BG_TILE_H, tile.x, tile.y);
+    const bytes = await canvasToBytes(c);
+    const result = await bridge.updateImageRawData(
+      new ImageRawDataUpdate({
+        containerID: tile.id,
+        containerName: tile.name,
+        imageData: bytes,
+      }),
+    );
+    if (result !== ImageRawDataUpdateResult.success) return result;
+  }
+  return ImageRawDataUpdateResult.success;
 }
 
 function delayUntilNextMinute(): number {
@@ -1379,6 +1497,15 @@ async function start(): Promise<void> {
       } catch (err) {
         statusEl.textContent = `Bridge ready. Map upload failed: ${err}`;
       }
+    } else if (view === "positions") {
+      try {
+        const r = await sendPositionsBackground(bridge);
+        if (r !== ImageRawDataUpdateResult.success) {
+          statusEl.textContent = `Bridge ready. Positions bg: ${r}.`;
+        }
+      } catch (err) {
+        statusEl.textContent = `Bridge ready. Positions bg failed: ${err}`;
+      }
     }
     void saveLastView(view, bridge);
   }
@@ -1473,6 +1600,8 @@ function wireSettingsUi(): void {
           await applyPage(bridge, buildView(cv));
           if (cv === "map") {
             try { await sendMapImages(bridge); } catch { /* ignore */ }
+          } else if (cv === "positions") {
+            try { await sendPositionsBackground(bridge); } catch { /* ignore */ }
           }
         }
       } catch {
