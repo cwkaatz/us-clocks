@@ -306,29 +306,28 @@ const ALASKA_MAP_H = 58;
 const ALASKA_MAP_ID = 101;
 const ALASKA_MAP_NAME = "alaska";
 
-// Positions view: 2 stacked image tiles covering the RIGHT HALF of the lens
-// canvas (x=288..576, y=0..288). Map content fits within 288×288. The left
-// half stays black. Two tiles instead of four halves the pixel cost on the
-// lens (~8.3 s → ~4 s send time at the lens's ~17 K pixels/s rate).
+// Positions view: full-canvas (576×288) background of the contiguous US, drawn
+// across a 2×2 grid of 288×144 image containers. Each tile renders the same
+// global projection but offset for its own quadrant; canvas-clip handles the
+// edges. IDs in 110-113 to keep them separate from the map-view image slots.
 const POS_BG_TILE_W = 288;
 const POS_BG_TILE_H = 144;
-const POS_MAP_LEFT_X = 288;
-const POS_MAP_AREA_W = 288;
-const POS_MAP_TOP_Y = 0;
-const POS_MAP_AREA_H = 288;
 const POS_BG_TILES: ReadonlyArray<{ x: number; y: number; id: number; name: string }> = [
-  { x: 288, y: 0,   id: 110, name: "pos-bg-tr" },
-  { x: 288, y: 144, id: 112, name: "pos-bg-br" },
+  { x: 0,   y: 0,   id: 110, name: "pos-bg-tl" },
+  { x: 288, y: 0,   id: 111, name: "pos-bg-tr" },
+  { x: 0,   y: 144, id: 112, name: "pos-bg-bl" },
+  { x: 288, y: 144, id: 113, name: "pos-bg-br" },
 ];
 
-// Four continental US zones repositioned to fit within the half-canvas map
-// area (lens x=288..576). Label widths (~96 px) are wider than the
-// narrowest zones (~52 px), so adjacent labels are vertically staggered.
+// Four continental US zones with vertically-staggered label positions so the
+// adjacent labels (which are wider than their 80-px zone bands on the lens)
+// don't overlap each other. ET pulled up off the horizontal line that
+// passes through the eastern states at mid-canvas y.
 const POSITIONS_LAYOUT: ReadonlyArray<{ abbr: string; tz: string; xPosition: number; yPosition: number }> = [
-  { abbr: "PT", tz: "America/Los_Angeles", xPosition: 290, yPosition: 130 },
-  { abbr: "MT", tz: "America/Denver",       xPosition: 346, yPosition: 170 },
-  { abbr: "CT", tz: "America/Chicago",      xPosition: 398, yPosition: 130 },
-  { abbr: "ET", tz: "America/New_York",     xPosition: 476, yPosition: 170 },
+  { abbr: "PT", tz: "America/Los_Angeles", xPosition: 55,  yPosition: 145 },
+  { abbr: "MT", tz: "America/Denver",       xPosition: 164, yPosition: 110 },
+  { abbr: "CT", tz: "America/Chicago",      xPosition: 246, yPosition: 180 },
+  { abbr: "ET", tz: "America/New_York",     xPosition: 368, yPosition: 127 },
 ];
 
 const statusEl = document.getElementById("status") as HTMLParagraphElement;
@@ -815,13 +814,18 @@ function drawPositionsBgTileStatic(
   tileX: number,
   tileY: number,
 ): void {
-  // Map fits within the right-half area (POS_MAP_LEFT_X..LENS_W, y=0..288).
+  const LENS_W = 576;
+  const LENS_H = 288;
+  // Map occupies y=POS_MAP_TOP_Y..LENS_H so the banner at the top of the
+  // canvas doesn't overlap the northern edge of the US shape.
+  const POS_MAP_TOP_Y = 30;
+  const POS_MAP_H = LENS_H - POS_MAP_TOP_Y; // 258
   const { minX, maxX, minY, maxY } = US_CONTIGUOUS_BOUNDS;
   const srcW = maxX - minX;
   const srcH = maxY - minY;
-  const scale = Math.min(POS_MAP_AREA_W / srcW, POS_MAP_AREA_H / srcH);
-  const globalOx = POS_MAP_LEFT_X + (POS_MAP_AREA_W - srcW * scale) / 2 - minX * scale;
-  const globalOy = POS_MAP_TOP_Y + (POS_MAP_AREA_H - srcH * scale) / 2 - minY * scale;
+  const scale = Math.min(LENS_W / srcW, POS_MAP_H / srcH);
+  const globalOx = (LENS_W - srcW * scale) / 2 - minX * scale;
+  const globalOy = POS_MAP_TOP_Y + (POS_MAP_H - srcH * scale) / 2 - minY * scale;
 
   ctx.fillStyle = "black";
   ctx.fillRect(0, 0, tileW, tileH);
@@ -862,14 +866,15 @@ function drawPositionsBgTileLabels(
   tileY: number,
   when: Date,
 ): void {
+  const LENS_W = 576;
+
   ctx.fillStyle = MAP_STROKE;
   ctx.setLineDash([]);
   ctx.textBaseline = "top";
-  // Banner centred within the half-canvas map area (right side of lens).
   ctx.font = "20px Helvetica, Arial, sans-serif";
   const bannerStr = topBannerText(when);
   const bannerWidth = ctx.measureText(bannerStr).width;
-  const bannerLensX = POS_MAP_LEFT_X + (POS_MAP_AREA_W - bannerWidth) / 2;
+  const bannerLensX = (LENS_W - bannerWidth) / 2;
   const bannerLensY = 8;
   ctx.fillText(bannerStr, bannerLensX - tileX, bannerLensY - tileY);
 
