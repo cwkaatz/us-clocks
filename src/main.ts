@@ -795,13 +795,17 @@ function drawAlaskaInset(ctx: CanvasRenderingContext2D, w: number, h: number): v
 // works on every other view doesn't work here, where image tiles cover the
 // full canvas. Each tile draws every label / the banner with appropriate
 // offset; canvas-clip handles content outside the tile.
-function drawPositionsBgTile(
+// Static-only portion of a positions tile: black background + map outline +
+// state borders + TZ borders. Doesn't depend on `when`, so we render this
+// once into a cached HTMLCanvasElement and drawImage it back onto a fresh
+// tile canvas on every send. Saves the ~50 ms of stroking 120 polylines per
+// tile per minute.
+function drawPositionsBgTileStatic(
   ctx: CanvasRenderingContext2D,
   tileW: number,
   tileH: number,
   tileX: number,
   tileY: number,
-  when: Date = new Date(),
 ): void {
   const LENS_W = 576;
   const LENS_H = 288;
@@ -824,10 +828,8 @@ function drawPositionsBgTile(
   ctx.rect(0, 0, tileW, tileH);
   ctx.clip();
 
-  // --- Three-layer map ---
-  // 1. Intra-zone state borders: faintest — low-alpha green, sparse dotted.
-  // 2. Outer outline: solid, thin, full brightness.
-  // 3. TZ-divider borders: same solid thin style as outline.
+  // Three-layer map: faint intra-zone state borders, solid outer outline,
+  // solid TZ-divider lines.
   ctx.lineJoin = "round";
   ctx.lineCap = "round";
   ctx.shadowBlur = 0;
@@ -846,8 +848,19 @@ function drawPositionsBgTile(
   strokePolylines(ctx, US_CONTIGUOUS_OUTLINE_POLYLINES, ox, oy, scale);
   strokePolylines(ctx, US_TZ_BORDER_POLYLINES, ox, oy, scale);
 
-  // --- Banner (baked in: this tile draws whatever portion of the banner
-  //     falls within its bounds; canvas-clip handles the rest) ---
+  ctx.restore();
+}
+
+// Dynamic overlays — banner with current local time and zone labels with
+// current times. Drawn fresh on every send.
+function drawPositionsBgTileLabels(
+  ctx: CanvasRenderingContext2D,
+  tileX: number,
+  tileY: number,
+  when: Date,
+): void {
+  const LENS_W = 576;
+
   ctx.fillStyle = MAP_STROKE;
   ctx.setLineDash([]);
   ctx.textBaseline = "top";
@@ -858,14 +871,28 @@ function drawPositionsBgTile(
   const bannerLensY = 8;
   ctx.fillText(bannerStr, bannerLensX - tileX, bannerLensY - tileY);
 
-  // --- Zone labels ---
   ctx.font = "22px Helvetica, Arial, sans-serif";
   for (const p of POSITIONS_LAYOUT) {
     const content = positionsTimeContent(p.abbr, p.tz, when);
     ctx.fillText(content, p.xPosition - tileX, p.yPosition - tileY);
   }
+}
 
-  ctx.restore();
+// Lazy cache for the static map portion of each tile — rendered once on the
+// first call to sendPositionsBackground, reused every minute thereafter.
+let posStaticCanvases: HTMLCanvasElement[] | null = null;
+function precachePosStaticTiles(): HTMLCanvasElement[] {
+  if (posStaticCanvases) return posStaticCanvases;
+  posStaticCanvases = POS_BG_TILES.map((tile) => {
+    const c = document.createElement("canvas");
+    c.width = POS_BG_TILE_W;
+    c.height = POS_BG_TILE_H;
+    const ctx = c.getContext("2d");
+    if (!ctx) throw new Error("no 2d context");
+    drawPositionsBgTileStatic(ctx, POS_BG_TILE_W, POS_BG_TILE_H, tile.x, tile.y);
+    return c;
+  });
+  return posStaticCanvases;
 }
 
 // Phone preview — single canvas showing both contiguous and Alaska in a
@@ -1391,16 +1418,30 @@ async function sendMapImages(bridge: Bridge): Promise<ImageRawDataUpdateResult> 
 async function sendPositionsBackground(
   bridge: Bridge,
 ): Promise<ImageRawDataUpdateResult> {
-  // Four image containers covering the full lens canvas, each rendering its
-  // quadrant of the contiguous US background. Serialised per SDK rules.
-  for (const tile of POS_BG_TILES) {
+  // Speed strategy:
+  //   1. Reuse the cached static map portion (drawImage instead of restroking
+  //      120 polylines per tile per minute).
+  //   2. Kick off canvas drawing + PNG encoding for ALL four tiles in
+  //      parallel, then await + send each result sequentially. The SDK
+  //      forbids concurrent updateImageRawData, so sends are serial — but
+  //      encoding for tiles 2-4 finishes while tile 1 is being transferred.
+  const statics = precachePosStaticTiles();
+  const when = new Date();
+
+  const pending = POS_BG_TILES.map(async (tile, i) => {
     const c = document.createElement("canvas");
     c.width = POS_BG_TILE_W;
     c.height = POS_BG_TILE_H;
     const ctx = c.getContext("2d");
     if (!ctx) throw new Error("no 2d context");
-    drawPositionsBgTile(ctx, POS_BG_TILE_W, POS_BG_TILE_H, tile.x, tile.y);
+    ctx.drawImage(statics[i], 0, 0);
+    drawPositionsBgTileLabels(ctx, tile.x, tile.y, when);
     const bytes = await canvasToBytes(c);
+    return { bytes, tile };
+  });
+
+  for (const promise of pending) {
+    const { bytes, tile } = await promise;
     const result = await bridge.updateImageRawData(
       new ImageRawDataUpdate({
         containerID: tile.id,
@@ -1480,6 +1521,13 @@ async function start(): Promise<void> {
     const pctx = mapEl.getContext("2d");
     if (pctx) drawPhoneMapPreview(pctx, mapEl.width, mapEl.height);
   }
+
+  // Pre-warm the Positions-view static-map cache so the first switch to that
+  // view doesn't pay the ~200 ms of polyline stroking. Async via setTimeout
+  // so it runs after the initial paint, not blocking startup.
+  setTimeout(() => {
+    try { precachePosStaticTiles(); } catch { /* ignore */ }
+  }, 0);
 
   const maybeBridge = await waitForBridgeWithTimeout();
   if (!maybeBridge) {
