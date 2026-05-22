@@ -1351,6 +1351,28 @@ async function pushColumnContainers(
   }
 }
 
+// Blank every other pixel in a checkerboard pattern (x+y is odd → black).
+// Halves the number of "lit" pixels and tends to compress PNGs significantly.
+// Applied to lens tiles before encoding as an experiment in reducing the
+// pixel/byte load that hits the lens decode pipeline.
+function applyCheckerboard(ctx: CanvasRenderingContext2D, w: number, h: number): void {
+  const img = ctx.getImageData(0, 0, w, h);
+  const d = img.data;
+  for (let y = 0; y < h; y++) {
+    const yOdd = y & 1;
+    for (let x = 0; x < w; x++) {
+      if (((x & 1) ^ yOdd) === 1) {
+        const i = (y * w + x) * 4;
+        d[i] = 0;
+        d[i + 1] = 0;
+        d[i + 2] = 0;
+        // alpha kept at 255 — keeps PNG in RGB rather than RGBA.
+      }
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+}
+
 async function canvasToBytes(canvas: HTMLCanvasElement): Promise<number[]> {
   const blob = await new Promise<Blob | null>((resolve) =>
     canvas.toBlob((b) => resolve(b), "image/png"),
@@ -1376,6 +1398,7 @@ async function ensureMapImagesBytes(): Promise<{ contig: number[]; ak: number[] 
     const ctx = c.getContext("2d");
     if (!ctx) throw new Error("no 2d context");
     draw(ctx, w, h);
+    applyCheckerboard(ctx, w, h);
     return c;
   };
   const contigC = drawTo(CONTIG_MAP_W, CONTIG_MAP_H, (ctx, w, h) =>
@@ -1452,6 +1475,7 @@ async function sendPositionsBackground(
     if (!ctx) throw new Error("no 2d context");
     ctx.drawImage(statics[i], 0, 0);
     drawPositionsBgTileLabels(ctx, tile.x, tile.y, when);
+    applyCheckerboard(ctx, POS_BG_TILE_W, POS_BG_TILE_H);
     const bytes = await canvasToBytes(c);
     return { bytes, tile };
   });
