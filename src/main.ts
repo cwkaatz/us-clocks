@@ -346,7 +346,20 @@ const factEl = document.getElementById("fact") as HTMLParagraphElement | null;
 const sunSectionEl = document.getElementById("sun-section") as HTMLElement | null;
 const sunRiseSetEl = document.getElementById("sun-rise-set") as HTMLParagraphElement | null;
 const sunDaylightEl = document.getElementById("sun-daylight") as HTMLParagraphElement | null;
+const perfStatsEl = document.getElementById("perf-stats") as HTMLParagraphElement | null;
 if (versionEl) versionEl.textContent = `v${__APP_VERSION__}`;
+
+// Rolling perf log — each view stamps its own line as it sends, so the phone
+// page shows a side-by-side comparison of Map vs Geographic timings.
+const perfLastByView = new Map<string, string>();
+function logPerf(view: string, line: string): void {
+  perfLastByView.set(view, line);
+  if (!perfStatsEl) return;
+  perfStatsEl.textContent = Array.from(perfLastByView.entries())
+    .map(([v, l]) => `${v}: ${l}`)
+    .join("\n");
+  perfStatsEl.style.whiteSpace = "pre";
+}
 
 const DST_FACTS = [
   "DST in the US starts on the second Sunday of March and ends on the first Sunday of November.",
@@ -1361,10 +1374,12 @@ async function canvasToBytes(canvas: HTMLCanvasElement): Promise<number[]> {
   return Array.from(new Uint8Array(await blob.arrayBuffer()));
 }
 
-async function sendMapImages(bridge: Bridge): Promise<ImageRawDataUpdateResult> {
-  // Three images sent SERIALLY — the SDK warns against concurrent
-  // updateImageRawData calls. Contiguous top + bottom halves stack to form
-  // a single 288×182 visual map; Alaska is its own inset below.
+// Map view images are 100 % static — no time-dependent content. We encode
+// once and reuse forever, so view-switches after the first only pay the
+// BT-transfer cost, not the canvas+PNG cost.
+let mapImagesBytesCache: { top: number[]; bot: number[]; ak: number[] } | null = null;
+async function ensureMapImagesBytes(): Promise<{ top: number[]; bot: number[]; ak: number[] }> {
+  if (mapImagesBytesCache) return mapImagesBytesCache;
   const drawTo = (
     w: number,
     h: number,
@@ -1378,14 +1393,26 @@ async function sendMapImages(bridge: Bridge): Promise<ImageRawDataUpdateResult> 
     draw(ctx, w, h);
     return c;
   };
-
-  const top = drawTo(CONTIG_HALF_W, CONTIG_HALF_H, (ctx, w, h) =>
+  const topC = drawTo(CONTIG_HALF_W, CONTIG_HALF_H, (ctx, w, h) =>
     drawContiguousMap(ctx, w, h, CONTIG_TOP_BOUNDS),
   );
-  const bot = drawTo(CONTIG_HALF_W, CONTIG_HALF_H, (ctx, w, h) =>
+  const botC = drawTo(CONTIG_HALF_W, CONTIG_HALF_H, (ctx, w, h) =>
     drawContiguousMap(ctx, w, h, CONTIG_BOTTOM_BOUNDS),
   );
-  const ak = drawTo(ALASKA_MAP_W, ALASKA_MAP_H, drawAlaskaInset);
+  const akC = drawTo(ALASKA_MAP_W, ALASKA_MAP_H, drawAlaskaInset);
+  const [top, bot, ak] = await Promise.all([
+    canvasToBytes(topC),
+    canvasToBytes(botC),
+    canvasToBytes(akC),
+  ]);
+  mapImagesBytesCache = { top, bot, ak };
+  return mapImagesBytesCache;
+}
+
+async function sendMapImages(bridge: Bridge): Promise<ImageRawDataUpdateResult> {
+  const t0 = performance.now();
+  const cached = await ensureMapImagesBytes();
+  const tReady = performance.now();
 
   // Repaint the phone preview to match.
   if (mapEl) {
@@ -1393,26 +1420,29 @@ async function sendMapImages(bridge: Bridge): Promise<ImageRawDataUpdateResult> 
     if (pctx) drawPhoneMapPreview(pctx, mapEl.width, mapEl.height);
   }
 
-  const send = async (
-    canvas: HTMLCanvasElement,
-    id: number,
-    name: string,
-  ): Promise<ImageRawDataUpdateResult> => {
-    const bytes = await canvasToBytes(canvas);
-    return await bridge.updateImageRawData(
+  const sends: Array<[number[], number, string]> = [
+    [cached.top, CONTIG_TOP_ID, CONTIG_TOP_NAME],
+    [cached.bot, CONTIG_BOTTOM_ID, CONTIG_BOTTOM_NAME],
+    [cached.ak, ALASKA_MAP_ID, ALASKA_MAP_NAME],
+  ];
+  let totalBytes = 0;
+  for (const [bytes, id, name] of sends) {
+    totalBytes += bytes.length;
+    const result = await bridge.updateImageRawData(
       new ImageRawDataUpdate({
         containerID: id,
         containerName: name,
         imageData: bytes,
       }),
     );
-  };
-
-  const r1 = await send(top, CONTIG_TOP_ID, CONTIG_TOP_NAME);
-  if (r1 !== ImageRawDataUpdateResult.success) return r1;
-  const r2 = await send(bot, CONTIG_BOTTOM_ID, CONTIG_BOTTOM_NAME);
-  if (r2 !== ImageRawDataUpdateResult.success) return r2;
-  return await send(ak, ALASKA_MAP_ID, ALASKA_MAP_NAME);
+    if (result !== ImageRawDataUpdateResult.success) return result;
+  }
+  const t1 = performance.now();
+  logPerf(
+    "Map",
+    `prep ${(tReady - t0).toFixed(0)}ms · send ${(t1 - tReady).toFixed(0)}ms · ${(totalBytes / 1024).toFixed(1)}KB`,
+  );
+  return ImageRawDataUpdateResult.success;
 }
 
 async function sendPositionsBackground(
@@ -1425,6 +1455,7 @@ async function sendPositionsBackground(
   //      parallel, then await + send each result sequentially. The SDK
   //      forbids concurrent updateImageRawData, so sends are serial — but
   //      encoding for tiles 2-4 finishes while tile 1 is being transferred.
+  const t0 = performance.now();
   const statics = precachePosStaticTiles();
   const when = new Date();
 
@@ -1440,8 +1471,12 @@ async function sendPositionsBackground(
     return { bytes, tile };
   });
 
+  let totalBytes = 0;
+  let firstReadyAt = -1;
   for (const promise of pending) {
     const { bytes, tile } = await promise;
+    if (firstReadyAt < 0) firstReadyAt = performance.now();
+    totalBytes += bytes.length;
     const result = await bridge.updateImageRawData(
       new ImageRawDataUpdate({
         containerID: tile.id,
@@ -1451,6 +1486,11 @@ async function sendPositionsBackground(
     );
     if (result !== ImageRawDataUpdateResult.success) return result;
   }
+  const t1 = performance.now();
+  logPerf(
+    "Geo",
+    `prep ${(firstReadyAt - t0).toFixed(0)}ms · send ${(t1 - firstReadyAt).toFixed(0)}ms · ${(totalBytes / 1024).toFixed(1)}KB`,
+  );
   return ImageRawDataUpdateResult.success;
 }
 
@@ -1522,11 +1562,12 @@ async function start(): Promise<void> {
     if (pctx) drawPhoneMapPreview(pctx, mapEl.width, mapEl.height);
   }
 
-  // Pre-warm the Positions-view static-map cache so the first switch to that
-  // view doesn't pay the ~200 ms of polyline stroking. Async via setTimeout
-  // so it runs after the initial paint, not blocking startup.
+  // Pre-warm static caches so the first switch to either map view doesn't
+  // pay the canvas/PNG cost. Async via setTimeout so it runs after the
+  // initial paint, not blocking startup.
   setTimeout(() => {
     try { precachePosStaticTiles(); } catch { /* ignore */ }
+    void ensureMapImagesBytes().catch(() => {});
   }, 0);
 
   const maybeBridge = await waitForBridgeWithTimeout();
