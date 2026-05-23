@@ -1158,7 +1158,12 @@ function buildPositionsView() {
     content: " ",
     isEventCapture: 1,
   });
-  const textObject = [evtCapture];
+  // Banner ALSO as a text container — visible immediately after page
+  // rebuild, before any image tile finishes loading (~2 s gap before the
+  // first tile arrives over BT). Once the top-row tiles land, they cover
+  // this text container, but the same banner is baked into the tiles, so
+  // the visual transition is seamless.
+  const textObject = [evtCapture, topBannerContainer()];
   const imageObject = bgImages;
   return {
     containerTotalNum: textObject.length + imageObject.length,
