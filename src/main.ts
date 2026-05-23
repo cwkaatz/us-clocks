@@ -1234,11 +1234,14 @@ function buildTutorialView() {
     "",
     "Tap or swipe to begin.",
   ].join("\n");
+  // Container must be tall enough to hold all 8 lines without overflowing
+  // — otherwise the firmware treats it as scrollable and swallows the
+  // first swipe as an internal scroll instead of dismissing the tutorial.
   const c = new TextContainerProperty({
     xPosition: 60,
-    yPosition: 30,
+    yPosition: 4,
     width: 456,
-    height: 232,
+    height: 280,
     containerID: 1,
     containerName: "tutorial",
     content: text,
