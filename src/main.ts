@@ -1133,8 +1133,11 @@ function buildPositionsView() {
   // images on top of text, so the obvious "text overlay" pattern is hidden
   // by the full-screen image. See drawPositionsBgTile.
   //
-  // A single 1×1 transparent text container is included only to satisfy the
-  // input-event capture requirement (images can't capture events).
+  // A text container is included only to satisfy the input-event capture
+  // requirement (images can't capture events). It's sized larger than its
+  // content so the firmware doesn't treat it as overflowing — overflowing
+  // text containers with isEventCapture=1 intercept the first swipe as an
+  // internal scroll, forcing the user to swipe twice to leave the page.
   const bgImages = POS_BG_TILES.map((tile) =>
     new ImageContainerProperty({
       xPosition: tile.x,
@@ -1148,8 +1151,8 @@ function buildPositionsView() {
   const evtCapture = new TextContainerProperty({
     xPosition: 0,
     yPosition: 0,
-    width: 1,
-    height: 1,
+    width: 60,
+    height: 40,
     containerID: 1,
     containerName: "evt",
     content: " ",
